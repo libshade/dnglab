@@ -1,7 +1,12 @@
 make = "SONY"
 model = "ZV-1"
-clean_make = "SONY"
+clean_make = "Sony"
 clean_model = "ZV-1"
+
+model_aliases = [
+  ["ZV-1A", "ZV-1A"],
+]
+
 ##blackpoint = 512
 #whitepoint = 16300
 color_pattern = "RGGB"

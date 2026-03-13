@@ -152,7 +152,7 @@ impl LensResolver {
     self
   }
 
-  fn lens_matcher(&self) -> LensMatcher {
+  fn lens_matcher(&self) -> LensMatcher<'_> {
     LensMatcher {
       lens_name: self.lens_keyname.as_deref(),
       lens_make: self.lens_make.as_deref(),
@@ -242,10 +242,7 @@ impl LensResolver {
           .is_none_or(|focal| *focal >= entry.focal_range[0] && *focal <= entry.focal_range[1])
       })
       .filter(|entry| {
-        self
-          .aperture
-          .as_ref()
-          .is_none_or(|ap| *ap >= entry.aperture_range[0] || *ap <= entry.aperture_range[1])
+        self.aperture.as_ref().is_none_or(|ap| *ap >= entry.aperture_range[0]) // equal or greater then lowest possible aperture
       })
       .collect();
     match matches.len() {
@@ -257,7 +254,7 @@ impl LensResolver {
           crate::ISSUE_HINT
         );
         for lens in matches {
-          log::warn!("Possible lens: {} {}", lens.lens_make, lens.lens_model);
+          log::debug!("Possible lens: {} {}", lens.lens_make, lens.lens_model);
         }
       }
       _ => {}

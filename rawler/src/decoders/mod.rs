@@ -3,6 +3,7 @@ use chrono::NaiveDateTime;
 use chrono::TimeZone;
 use image::DynamicImage;
 use image::ImageBuffer;
+use image::ImageFormat;
 use image::Luma;
 use image::Rgb;
 use log::debug;
@@ -145,9 +146,9 @@ pub static CAMERAS_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/cameras.
 pub static SAMPLE: &str = "\nPlease submit samples at https://raw.pixls.us/";
 pub static BUG: &str = "\nPlease file a bug with a sample file at https://github.com/dnglab/dnglab/issues";
 
-const SUPPORTED_FILES_EXT: [&str; 28] = [
-  "ARI", "ARW", "CR2", "CR3", "CRM", "CRW", "DCR", "DCS", "DNG", "ERF", "IIQ", "KDC", "MEF", "MOS", "MRW", "NEF", "NRW", "ORF", "PEF", "RAF", "RAW", "RW2",
-  "RWL", "SRW", "3FR", "FFF", "X3F", "QTK",
+const SUPPORTED_FILES_EXT: [&str; 29] = [
+  "ARI", "ARW", "CR2", "CR3", "CRM", "CRW", "DCR", "DCS", "DNG", "ERF", "IIQ", "KDC", "MEF", "MOS", "MRW", "NEF", "NRW", "ORF", "ORI", "PEF", "RAF", "RAW",
+  "RW2", "RWL", "SRW", "3FR", "FFF", "X3F", "QTK",
 ];
 
 /// Get list of supported file extensions. All names
@@ -336,7 +337,6 @@ pub trait Decoder: Send {
     Ok(None)
   }
 
-  // TODO: extend with decode params for image index
   fn thumbnail_image(&self, _file: &RawSource, _params: &RawDecodeParams) -> Result<Option<DynamicImage>> {
     warn!("Decoder has no thumbnail image support, fallback to preview image");
     Ok(None)
@@ -501,6 +501,13 @@ pub(crate) fn ok_cfa_image_with_black_white(camera: Camera, cpp: usize, wb_coeff
   Ok(img)
 }
    */
+
+pub(crate) fn dynamic_image_from_jpeg_interchange_format(ifd: &IFD, rawsource: &RawSource) -> Result<DynamicImage> {
+  let offset = fetch_tiff_tag!(ifd, ExifTag::JPEGInterchangeFormat).force_usize(0) as u64;
+  let size = fetch_tiff_tag!(ifd, ExifTag::JPEGInterchangeFormatLength).force_usize(0) as u64;
+  let buf = rawsource.subview(offset, size)?;
+  image::load_from_memory_with_format(buf, ImageFormat::Jpeg).map_err(|err| RawlerError::DecoderFailed(format!("Failed to read JPEG image: {:?}", err)))
+}
 
 pub(crate) fn dynamic_image_from_ifd(ifd: &IFD, rawsource: &RawSource) -> Result<DynamicImage> {
   let tiff_width = fetch_tiff_tag!(ifd, TiffCommonTag::ImageWidth).force_usize(0);
@@ -950,6 +957,7 @@ impl RawLoader {
             "LEICA CAMERA AG" => return use_decoder!(rw2::Rw2Decoder, rawfile, tiff, self),
             //"FUJIFILM" => return use_decoder!(raf::RafDecoder, rawfile, tiff, self),
             "NIKON" => return use_decoder!(nrw::NrwDecoder, rawfile, tiff, self),
+            "Nikon" => return use_decoder!(nef::NefDecoder, rawfile, tiff, self),
             "NIKON CORPORATION" => return use_decoder!(nef::NefDecoder, rawfile, tiff, self),
             x => {
               return Err(RawlerError::Unsupported {
@@ -1109,7 +1117,7 @@ where
 /// Caution: The last chunk may not be equal to `lines`.
 pub fn decode_threaded_multiline_prealloc<'a, T, F>(pixbuf: &'a mut Pix2D<T>, lines: usize, closure: &F) -> std::result::Result<(), String>
 where
-  F: Fn(&mut (dyn LineIteratorMut<'a, T>), usize, usize) -> std::result::Result<(), String> + Sync,
+  F: Fn(&mut dyn LineIteratorMut<'a, T>, usize, usize) -> std::result::Result<(), String> + Sync,
   T: SubPixel + 'a,
 {
   let width = pixbuf.width;

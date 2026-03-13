@@ -13,6 +13,7 @@ use crate::{
   CFA, RawImage, RawImageData,
   decoders::{Camera, RawMetadata},
   dng::rect_to_dng_area,
+  envparams::{rawler_dng_multistrip_threshold, rawler_dng_rows_per_strip},
   formats::tiff::{
     CompressionMethod, PhotometricInterpretation, PreviewColorSpace, Rational, TiffError, Value,
     writer::{DirectoryWriter, TiffWriter, transfer_entry},
@@ -316,7 +317,11 @@ where
 
   pub fn preview(&mut self, img: &DynamicImage, quality: f32) -> Result<()> {
     let now = Instant::now();
-    let preview_img = DynamicImage::ImageRgb8(img.resize(1024, 768, FilterType::Nearest).to_rgb8());
+    let preview_img = if img.width() > 1024 {
+      DynamicImage::ImageRgb8(img.resize(1024, 768, FilterType::Nearest).to_rgb8())
+    } else {
+      DynamicImage::ImageRgb8(img.to_rgb8())
+    };
     debug!("preview downscale: {} s", now.elapsed().as_secs_f32());
 
     self.ifd_mut().add_tag(TiffCommonTag::ImageWidth, Value::long(preview_img.width()));
@@ -454,11 +459,11 @@ where
     Ok(())
   }
 
-  pub fn subframe(&mut self, id: u32) -> SubFrameWriter<B> {
+  pub fn subframe(&mut self, id: u32) -> SubFrameWriter<'_, B> {
     SubFrameWriter::new(self, id, false)
   }
 
-  pub fn subframe_on_root(&mut self, id: u32) -> SubFrameWriter<B> {
+  pub fn subframe_on_root(&mut self, id: u32) -> SubFrameWriter<'_, B> {
     SubFrameWriter::new(self, id, true)
   }
 
@@ -649,7 +654,11 @@ where
   let mut strip_sizes: Vec<u32> = Vec::new();
   let mut strip_rows: Vec<u32> = Vec::new();
 
-  let rows_per_strip = if rawimage.height > 1000 { 256 } else { rawimage.height };
+  let rows_per_strip = if rawimage.height > rawler_dng_multistrip_threshold().unwrap_or(100) {
+    rawler_dng_rows_per_strip().unwrap_or(256)
+  } else {
+    rawimage.height
+  };
 
   match rawimage.data {
     RawImageData::Integer(ref data) => {
@@ -695,9 +704,15 @@ mod tests {
     let mut dng = DngWriter::new(&mut buf, DNG_VERSION_V1_4)?;
     dng.root_ifd_mut().add_tag(TiffCommonTag::Artist, "Test");
     dng.close()?;
+    #[cfg(target_endian = "little")]
     let expected_output = [
       73, 73, 42, 0, 36, 0, 0, 0, 1, 0, 0, 144, 7, 0, 4, 0, 0, 0, 48, 50, 50, 48, 0, 0, 0, 0, 0, 0, 84, 101, 115, 116, 0, 0, 0, 0, 4, 0, 59, 1, 2, 0, 5, 0, 0,
       0, 28, 0, 0, 0, 105, 135, 4, 0, 1, 0, 0, 0, 8, 0, 0, 0, 18, 198, 1, 0, 4, 0, 0, 0, 1, 6, 0, 0, 19, 198, 1, 0, 4, 0, 0, 0, 1, 4, 0, 0, 0, 0, 0, 0,
+    ];
+    #[cfg(not(target_endian = "little"))]
+    let expected_output = [
+      77, 77, 0, 42, 0, 0, 0, 36, 0, 1, 144, 0, 0, 7, 0, 0, 0, 4, 48, 50, 50, 48, 0, 0, 0, 0, 0, 0, 84, 101, 115, 116, 0, 0, 0, 0, 0, 4, 1, 59, 0, 2, 0, 0, 0,
+      5, 0, 0, 0, 28, 135, 105, 0, 4, 0, 0, 0, 1, 0, 0, 0, 8, 198, 18, 0, 1, 0, 0, 0, 4, 0, 0, 6, 1, 198, 19, 0, 1, 0, 0, 0, 4, 0, 0, 4, 1, 0, 0, 0, 0,
     ];
     assert_eq!(expected_output, buf.into_inner().as_slice());
     Ok(())

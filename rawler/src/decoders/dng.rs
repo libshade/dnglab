@@ -7,8 +7,8 @@ use crate::formats::tiff::Value;
 use crate::imgop::Dim2;
 use crate::imgop::Point;
 use crate::imgop::Rect;
-use crate::imgop::xyz::FlatColorMatrix;
-use crate::imgop::xyz::Illuminant;
+use crate::imgop::matrix::*;
+use crate::imgop::xyz::*;
 use crate::tags::DngTag;
 use crate::tags::TiffCommonTag;
 
@@ -42,9 +42,18 @@ impl<'a> Decoder for DngDecoder<'a> {
 
     let mut cam = self.make_camera(raw, width, height)?;
     // If we know the camera, re-use the clean names
-    if let Ok(known_cam) = self.rawloader.check_supported(self.tiff.root_ifd()) {
+    if let Ok(known_cam) = self
+      .rawloader
+      .check_supported_with_mode(self.tiff.root_ifd(), "dng")
+      .or_else(|_| self.rawloader.check_supported(self.tiff.root_ifd()))
+    {
       cam.clean_make = known_cam.clean_make;
       cam.clean_model = known_cam.clean_model;
+      cam.hints.extend_from_slice(&known_cam.hints);
+      cam.params.extend(known_cam.params.iter().map(|(k, v)| (k.clone(), v.clone())));
+    } else {
+      log::debug!("DNG: camera {} / {} is not in the camera catalog", cam.make, cam.model);
+      // panic!("Camera {} / {} is not in the camera catalog", cam.make, cam.model);
     }
 
     let blacklevel = self.get_blacklevels(raw)?;
@@ -58,18 +67,8 @@ impl<'a> Decoder for DngDecoder<'a> {
     };
 
     let raw_data = plain_image_from_ifd(raw, file)?;
-    let mut image = RawImage::new_with_data(
-      cam,
-      raw_data,
-      width * cpp,
-      height,
-      cpp,
-      self.get_wb()?,
-      photometric,
-      blacklevel,
-      whitelevel,
-      dummy,
-    );
+    let wb_coeffs = self.get_wb(&cam)?;
+    let mut image = RawImage::new_with_data(cam, raw_data, width * cpp, height, cpp, wb_coeffs, photometric, blacklevel, whitelevel, dummy);
     image.orientation = orientation;
     Ok(image)
   }
@@ -289,9 +288,19 @@ impl<'a> DngDecoder<'a> {
     })
   }
 
-  fn get_wb(&self) -> Result<[f32; 4]> {
-    if let Some(levels) = self.tiff.get_entry(TiffCommonTag::AsShotNeutral) {
+  fn get_wb(&self, cam: &Camera) -> Result<[f32; 4]> {
+    if let Some(levels) = self.tiff.get_entry(DngTag::AsShotNeutral) {
       Ok([1.0 / levels.force_f32(0), 1.0 / levels.force_f32(1), 1.0 / levels.force_f32(2), f32::NAN])
+    } else if let Some(levels) = self.tiff.get_entry(DngTag::AsShotWhiteXY) {
+      // TODO: improve once AnalogBalance and CC is properly implemented
+      if let Some(flat_colormatrix) = cam.color_matrix.get(&Illuminant::D65)
+        && let Some(colormatrix) = transform_1d::<3, 3>(flat_colormatrix)
+      {
+        let wb_coeff = xy_whitepoint_to_wb_coeff(levels.force_f32(0), levels.force_f32(1), &colormatrix);
+        Ok([wb_coeff[0], wb_coeff[1], wb_coeff[2], f32::NAN])
+      } else {
+        Ok([f32::NAN, f32::NAN, f32::NAN, f32::NAN])
+      }
     } else {
       Ok([f32::NAN, f32::NAN, f32::NAN, f32::NAN])
     }
@@ -401,13 +410,19 @@ impl<'a> DngDecoder<'a> {
 
     let mut read_matrix = |cal: DngTag, mat: DngTag| -> Result<()> {
       if let Some(c) = self.tiff.get_entry(mat) {
-        let illuminant: Illuminant = fetch_tiff_tag!(self.tiff, cal).force_u16(0).try_into()?;
+        let illuminant_val = self.tiff.get_entry(cal).map(|e| e.force_u16(0)).unwrap_or(21);
+        let illuminant: Illuminant = illuminant_val.try_into().unwrap_or(Illuminant::D65);
+
         let mut matrix = FlatColorMatrix::new();
         for i in 0..c.count() as usize {
           matrix.push(c.force_f32(i));
         }
-        assert!(matrix.len() <= 12 && !matrix.is_empty());
-        result.insert(illuminant, matrix);
+
+        if !matrix.is_empty() && matrix.len() <= 12 {
+          result.insert(illuminant, matrix);
+        } else {
+          log::warn!("Invalid ColorMatrix dimensions for illuminant {:?}: length {}", illuminant, matrix.len());
+        }
       }
       Ok(())
     };

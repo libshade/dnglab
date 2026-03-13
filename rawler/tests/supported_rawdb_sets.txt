@@ -85,6 +85,7 @@ cameras/Canon/EOS R5 C/raw_modes
 cameras/Canon/EOS R5 C/crm
 cameras/Canon/EOS R6/raw_modes
 cameras/Canon/EOS R6 Mark II/raw_modes
+cameras/Canon/EOS R6 Mark III/raw_modes
 cameras/Canon/EOS R7/raw_modes
 cameras/Canon/EOS R8/raw_modes
 cameras/Canon/EOS R10/raw_modes
@@ -291,6 +292,7 @@ cameras/Nikon/Df/raw_modes
 cameras/Nikon/D800/raw_modes
 cameras/Nikon/D3100/raw_modes
 cameras/Nikon/Z 5/raw_modes
+cameras/Nikon/Z 5 II/raw_modes
 cameras/Nikon/NIKON Z 6_2/raw_modes
 cameras/Nikon/NIKON Z 6_3/raw_modes
 cameras/Nikon/NIKON Z 7_2/raw_modes
@@ -303,6 +305,7 @@ cameras/Nikon/NIKON Z fc/raw_modes
 cameras/Nikon/Z 7/raw_modes
 cameras/Nikon/NIKON Z 9/raw_modes
 cameras/Nikon/NIKON Z 8/raw_modes
+cameras/Nikon/Nikon COOLSCAN 5000 ED/raw_modes
 cameras/Sony/DSC-F828/raw_modes
 cameras/Sony/DSC-HX95/raw_modes
 cameras/Sony/DSC-HX99/raw_modes
@@ -347,6 +350,7 @@ cameras/Sony/ILCA-99M2/raw_modes
 cameras/Sony/ILME-FX30/raw_modes
 cameras/Sony/ILME-FX3/raw_modes
 cameras/Sony/ILCE-1/raw_modes
+cameras/Sony/ILCE-1M2/raw_modes
 cameras/Sony/ILCE-3000/raw_modes
 cameras/Sony/ILCE-3500/raw_modes
 cameras/Sony/ILCE-5000/raw_modes
@@ -366,6 +370,7 @@ cameras/Sony/ILCE-7M2/raw_modes
 cameras/Sony/ILCE-7M3/raw_modes
 cameras/Sony/ILCE-7M4/raw_modes
 cameras/Sony/ILCE-7M4/resolutions
+cameras/Sony/ILCE-7M5/raw_modes
 cameras/Sony/ILCE-7/raw_modes
 cameras/Sony/ILCE-7RM2/raw_modes
 cameras/Sony/ILCE-7RM3A/raw_modes
@@ -402,6 +407,7 @@ cameras/Sony/SLT-A65/raw_modes
 cameras/Sony/SLT-A77/raw_modes
 cameras/Sony/SLT-A99/raw_modes
 cameras/Sony/ZV-1/raw_modes
+cameras/Sony/ZV-1M2/raw_modes
 cameras/Sony/ZV-E1/raw_modes
 cameras/Sony/ZV-E10/raw_modes
 cameras/Sony/ZV-E10M2/raw_modes
@@ -446,6 +452,9 @@ cameras/Samsung/NX1000/raw_modes
 cameras/Samsung/NX100/raw_modes
 cameras/Samsung/NX1100/raw_modes
 cameras/Samsung/NX1/raw_modes
+cameras/Samsung/NX5/raw_modes
+cameras/Samsung/NX10/raw_modes
+cameras/Samsung/NX11/raw_modes
 cameras/Samsung/NX2000/raw_modes
 cameras/Samsung/NX200/raw_modes
 cameras/Samsung/NX20/raw_modes
@@ -527,6 +536,7 @@ cameras/Olympus/SH-2/raw_modes
 cameras/Olympus/SP350/raw_modes
 cameras/Olympus/SP500UZ/raw_modes
 cameras/Olympus/SP510UZ/raw_modes
+cameras/Olympus/SP550UZ/raw_modes
 cameras/Olympus/SP565UZ/raw_modes
 cameras/Olympus/SP570UZ/raw_modes
 cameras/Olympus/Stylus1/raw_modes
@@ -561,7 +571,9 @@ cameras/Panasonic/DC-GX9/raw_modes
 cameras/Panasonic/DC-LX100M2/raw_modes
 cameras/Panasonic/DC-S1H/raw_modes
 cameras/Panasonic/DC-S1/raw_modes
+cameras/Panasonic/DC-S1M2ES/raw_modes
 cameras/Panasonic/DC-S1R/raw_modes
+cameras/Panasonic/DC-S1RM2/raw_modes
 cameras/Panasonic/DC-S5/raw_modes
 cameras/Panasonic/DC-S5M2/raw_modes
 cameras/Panasonic/DC-S5M2X/raw_modes
@@ -662,6 +674,19 @@ cameras/Leica/V-LUX 1/raw_modes
 cameras/Leica/V-LUX 4/raw_modes
 cameras/Leica/V-LUX 5/raw_modes
 cameras/Leica/V-LUX Typ 114/raw_modes
+cameras/Leica/CL/raw_modes
+cameras/Leica/M10/raw_modes
+cameras/Leica/M10-R/raw_modes
+cameras/Leica/M8/raw_modes
+cameras/Leica/M9/raw_modes
+cameras/Leica/M Monochrom/raw_modes
+cameras/Leica/M Monochrom Typ 246/raw_modes
+cameras/Leica/M Typ 240/raw_modes
+cameras/Leica/Q2/raw_modes
+cameras/Leica/Q Typ 116/raw_modes
+cameras/Leica/SL2/raw_modes
+cameras/Leica/SL Typ 601/raw_modes
+cameras/Leica/X2/raw_modes
 cameras/Fujifilm/DBP for GX680/raw_modes
 cameras/Fujifilm/FinePix E550/raw_modes
 cameras/Fujifilm/FinePix E900/raw_modes
@@ -728,6 +753,7 @@ cameras/Fujifilm/X-E3/compressed
 cameras/Fujifilm/X-E3/raw_modes
 cameras/Fujifilm/X-E4/compressed
 cameras/Fujifilm/X-E4/raw_modes
+cameras/Fujifilm/X-E5/raw_modes
 cameras/Fujifilm/XF10/raw_modes
 cameras/Fujifilm/XF1/raw_modes
 cameras/Fujifilm/X-H1/compressed
@@ -758,6 +784,7 @@ cameras/Fujifilm/X-T2/raw_modes
 cameras/Fujifilm/X-T30/compressed
 cameras/Fujifilm/X-T30 II/compressed
 cameras/Fujifilm/X-T30 II/raw_modes
+cameras/Fujifilm/X-T30 III/raw_modes
 cameras/Fujifilm/X-T30/raw_modes
 cameras/Fujifilm/X-T3/compressed
 cameras/Fujifilm/X-T3/raw_modes
@@ -767,5 +794,6 @@ cameras/Fujifilm/X-T5/raw_modes
 cameras/Fujifilm/X-T50/raw_modes
 cameras/OM/OM-1/raw_modes
 cameras/OM/OM-1 Mark II/raw_modes
+cameras/OM/OM-3/raw_modes
 cameras/OM/OM-5/raw_modes
 cameras/OM/TG-7/raw_modes

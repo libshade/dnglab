@@ -70,6 +70,16 @@ aperture_range = [[28, 10], [28, 10]]
 
 [[lenses]]
 mount = "rf-mount"
+key = "RF28-70mm F2.8 IS STM"
+lens_id = 61182
+lens_subid = 318
+make = "Canon"
+model = "RF 24-70mm F2.8L IS STM"
+focal_range = [[24, 1], [70, 1]]
+aperture_range = [[28, 10], [28, 10]]
+
+[[lenses]]
+mount = "rf-mount"
 key = "RF15-35mm F2.8 L IS USM"
 lens_id = 61182
 lens_subid = 264
@@ -328,3 +338,33 @@ make = "Canon"
 model = "RF 28mm F2.8 STM"
 focal_range = [[28, 1], [28, 1]]
 aperture_range = [[28, 10], [28,10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF70-200mm F2.8 L IS USM Z"
+lens_id = 61182
+lens_subid = 319
+make = "Canon"
+model = "RF 70-200mm F2.8L IS USM Z"
+focal_range = [[70, 1], [200, 1]]
+aperture_range = [[28, 10], [28, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF50mm F1.4 L VCM"
+lens_id = 61182
+lens_subid = 325
+make = "Canon"
+model = "RF 50mm F1.4L VCM"
+focal_range = [[50, 1], [50, 1]]
+aperture_range = [[14, 10], [14, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF5.2mm F2.8 L DUAL FISHEYE"
+lens_id = 61182
+lens_subid = 301
+make = "Canon"
+model = "RF 5.2mm F2.8L DUAL FISHEYE"
+focal_range = [[52, 10], [52, 10]]
+aperture_range = [[28, 10], [28, 10]]

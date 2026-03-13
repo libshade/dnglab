@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1
 // Copyright 2021 Daniel Vogelbacher <daniel@chaospixel.com>
 
+pub mod chromatic_adaption;
 pub mod develop;
 pub mod gamma;
 pub mod matrix;
@@ -307,7 +308,7 @@ pub fn convert_from_f32_unscaled_u16(pix: &[f32]) -> Vec<u16> {
 #[multiversion(targets("x86_64+avx+avx2", "x86+sse", "aarch64+neon"))]
 pub fn convert_from_f32_scaled_u16(input: &[f32], black: u16, white: u16) -> Vec<u16> {
   if black == u16::default() {
-    input.iter().map(|p| ((p * f32::from(white)) as u16)).collect()
+    input.iter().map(|p| (p * f32::from(white)) as u16).collect()
   } else {
     input.iter().map(|p| ((p * f32::from(white - black)) as u16) + black).collect()
   }

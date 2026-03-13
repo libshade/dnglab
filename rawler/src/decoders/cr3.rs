@@ -3,6 +3,7 @@
 
 use image::DynamicImage;
 use log::{debug, warn};
+use num::Zero;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 
@@ -291,8 +292,12 @@ impl<'a> Decoder for Cr3Decoder<'a> {
     let cmp1 = self.cmp1_box(raw_trak_id).ok_or(format!("CMP1 box not found for trak {}", raw_trak_id))?;
     debug!("cmp1 mdat hdr size: {}", cmp1.mdat_hdr_size);
 
-    let mut wb = cr3md.wb.unwrap_or([f32::NAN, f32::NAN, f32::NAN, f32::NAN]);
-    let whitelevel = cr3md.whitelevel.unwrap_or(u16::MAX);
+    let mut wb = cr3md.wb.unwrap_or_else(|| {
+      // This is known for R5 C CRM Standard-Raw files
+      log::warn!("No WB info in CR3 metadata found, fallback to 1.0 coefficients");
+      [1.0, 1.0, 1.0, f32::NAN]
+    });
+    let whitelevel = cr3md.whitelevel.unwrap_or(((1_u32 << self.camera.bps.unwrap_or(16)) - 1) as u16);
 
     // Special handling for CRM movie files
     if let Some(entry) = self.cmt3.get_entry(0x0001) {
@@ -458,13 +463,6 @@ impl<'a> Cr3Decoder<'a> {
     }
     let mut md = Cr3Metadata::default();
 
-    let resolver = LensResolver::new()
-      .with_lens_keyname(self.read_lens_name()?)
-      .with_camera(&self.camera) // must follow with_lens_keyname() as it my override key
-      .with_lens_id(self.read_lens_id()?)
-      .with_mounts(&[CANON_CN_MOUNT.into(), CANON_EF_MOUNT.into(), CANON_RF_MOUNT.into()]);
-    md.lens_description = resolver.resolve();
-
     if let Some(Entry {
       value: crate::formats::tiff::Value::Byte(v),
       ..
@@ -550,6 +548,15 @@ impl<'a> Cr3Decoder<'a> {
         md.ctmd_rec9 = Some(rec9);
       }
     }
+
+    let resolver = LensResolver::new()
+      .with_lens_keyname(self.read_lens_name()?)
+      .with_camera(&self.camera) // must follow with_lens_keyname() as it my override key
+      .with_lens_id(self.read_lens_id()?)
+      .with_aperture(md.ctmd_exposure.as_ref().map(|x| x.fnumber.clone()))
+      .with_focal_len(md.ctmd_focallen.clone())
+      .with_mounts(&[CANON_CN_MOUNT.into(), CANON_EF_MOUNT.into(), CANON_RF_MOUNT.into()]);
+    md.lens_description = resolver.resolve();
 
     debug!("CR3 blacklevels: {:?}", md.blacklevels);
     debug!("CR3 whitelevel: {:?}", md.whitelevel);
@@ -679,8 +686,15 @@ impl Ctmd {
 
   pub fn focal_len(&self) -> Result<Option<Rational>> {
     if let Some(rec) = self.records.get(&4) {
+      if rec.payload.len() < 4 {
+        return Ok(None)
+      }
       let mut buf = ByteStream::new(rec.payload.as_slice(), Endian::Little);
       let focal_len = Rational::new(buf.get_u16().into(), buf.get_u16().into());
+      if focal_len.d.is_zero() {
+        // Canon EOS R_RAW_ISO_100_nocrop_nodual.CR3 has an invalid Rational value
+        return Ok(None);
+      }
       Ok(Some(focal_len))
     } else {
       Ok(None)
