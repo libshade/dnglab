@@ -1,30 +1,33 @@
-use std::f32::NAN;
-
 use image::DynamicImage;
-use image::ImageBuffer;
-use image::Rgb;
 use log::debug;
 use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::RawImage;
+use crate::RawLoader;
+use crate::RawlerError;
+use crate::Result;
 use crate::alloc_image_ok;
 use crate::analyze::FormatDump;
-use crate::bits::clampbits;
 use crate::bits::BEu16;
 use crate::bits::BEu32;
 use crate::bits::Endian;
 use crate::bits::LEu32;
 use crate::bits::LookupTable;
+use crate::bits::clampbits;
+use crate::buffer::PaddedBuf;
 use crate::decoders::decode_threaded;
+use crate::decoders::dynamic_image_from_ifd;
+use crate::decoders::dynamic_image_from_jpeg_interchange_format;
 use crate::decoders::nef::lensdata::NefLensData;
 use crate::decompressors::ljpeg::huffman::HuffTable;
 use crate::exif::Exif;
+use crate::formats::tiff::GenericTiffReader;
+use crate::formats::tiff::IFD;
+use crate::formats::tiff::Value;
 use crate::formats::tiff::ifd::OffsetMode;
 use crate::formats::tiff::reader::TiffReader;
-use crate::formats::tiff::GenericTiffReader;
-use crate::formats::tiff::Value;
-use crate::formats::tiff::IFD;
 use crate::imgop::Dim2;
 use crate::imgop::Point;
 use crate::imgop::Rect;
@@ -38,18 +41,14 @@ use crate::pumps::ByteStream;
 use crate::rawimage::CFAConfig;
 use crate::rawimage::RawPhotometricInterpretation;
 use crate::rawimage::WhiteLevel;
+use crate::rawsource::RawSource;
 use crate::tags::ExifTag;
 use crate::tags::TiffCommonTag;
-use crate::OptBuffer;
-use crate::RawFile;
-use crate::RawImage;
-use crate::RawLoader;
-use crate::RawlerError;
-use crate::Result;
 
 use super::BlackLevel;
 use super::Camera;
 use super::Decoder;
+use super::FormatHint;
 use super::RawDecodeParams;
 use super::RawMetadata;
 
@@ -145,8 +144,11 @@ pub struct NefDecoder<'a> {
 }
 
 impl<'a> NefDecoder<'a> {
-  pub fn new(file: &mut RawFile, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<NefDecoder<'a>> {
-    let raw = tiff.find_first_ifd_with_tag(TiffCommonTag::CFAPattern).unwrap();
+  pub fn new(file: &RawSource, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<NefDecoder<'a>> {
+    let raw = tiff
+      .find_first_ifd_with_tag(TiffCommonTag::CFAPattern)
+      .or_else(|| tiff.find_ifd_with_new_subfile_type(0))
+      .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a suitable IFD in NEF decoder")))?;
     let bps = fetch_tiff_tag!(raw, TiffCommonTag::BitsPerSample).force_usize(0);
 
     // Make sure we always use a 12/14 bit mode to get correct white/blackpoints
@@ -154,7 +156,7 @@ impl<'a> NefDecoder<'a> {
     let camera = rawloader.check_supported_with_mode(tiff.root_ifd(), &mode)?;
 
     let makernote = if let Some(exif) = tiff.find_first_ifd_with_tag(ExifTag::MakerNotes) {
-      exif.parse_makernote(file.inner(), OffsetMode::Absolute, &[])?
+      exif.parse_makernote(&mut file.reader(), OffsetMode::Absolute, &[])?
     } else {
       warn!("NEF makernote not found");
       None
@@ -173,11 +175,16 @@ impl<'a> NefDecoder<'a> {
 }
 
 impl<'a> Decoder for NefDecoder<'a> {
-  fn raw_image(&self, file: &mut RawFile, _params: RawDecodeParams, dummy: bool) -> Result<RawImage> {
-    let raw = self.tiff.find_first_ifd_with_tag(TiffCommonTag::CFAPattern).unwrap();
+  fn raw_image(&self, file: &RawSource, _params: &RawDecodeParams, dummy: bool) -> Result<RawImage> {
+    let raw = self
+      .tiff
+      .find_first_ifd_with_tag(TiffCommonTag::CFAPattern)
+      .or_else(|| self.tiff.find_ifd_with_new_subfile_type(0))
+      .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a suitable IFD in NEF decoder")))?;
     let mut width = fetch_tiff_tag!(raw, TiffCommonTag::ImageWidth).force_usize(0);
     let height = fetch_tiff_tag!(raw, TiffCommonTag::ImageLength).force_usize(0);
     let bps = fetch_tiff_tag!(raw, TiffCommonTag::BitsPerSample).force_usize(0);
+    let mut cpp = fetch_tiff_tag!(raw, TiffCommonTag::BitsPerSample).count(); // Linear files don't have SamplesPerPixel
     let compression = fetch_tiff_tag!(raw, TiffCommonTag::Compression).force_usize(0);
 
     let nef_compression = if let Some(z_makernote) = self.makernote.get_entry(NikonMakernote::Makernotes0x51) {
@@ -195,6 +202,10 @@ impl<'a> Decoder for NefDecoder<'a> {
     };
     debug!("TIFF compression flag: {}, NEF compression mode: {:?}", compression, nef_compression);
 
+    if matches!(nef_compression, Some(NefCompression::HighEfficency)) || matches!(nef_compression, Some(NefCompression::HighEfficencyStar)) {
+      return Err(RawlerError::DecoderFailed(format!("NEF compression {:?} is not supported", nef_compression)));
+    }
+
     let offset = fetch_tiff_tag!(raw, TiffCommonTag::StripOffsets).force_usize(0);
     let size = fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts).force_usize(0);
     let rows_per_strip = fetch_tiff_tag!(raw, TiffCommonTag::RowsPerStrip).get_usize(0).ok().flatten().unwrap_or(height);
@@ -203,8 +214,8 @@ impl<'a> Decoder for NefDecoder<'a> {
     // Because the strips has no holes between and are perfectly aligned, we can process the whole
     // chunk at once, instead of iterating over every strip.
     // It would be safer to process each strip offset, but it is not need for any known model so far.
-    let src: OptBuffer = if rows_per_strip == height {
-      file.subview(offset as u64, size as u64)?.into()
+    let src = if rows_per_strip == height {
+      file.subview_padded(offset as u64, size as u64)?
     } else {
       let full_size: u32 = match fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts) {
         Value::Long(data) => data.iter().copied().sum(),
@@ -212,10 +223,9 @@ impl<'a> Decoder for NefDecoder<'a> {
           return Err("StripByteCounts is not of type LONG".into());
         }
       };
-      file.subview(offset as u64, full_size as u64)?.into()
+      file.subview_padded(offset as u64, full_size as u64)?
     };
 
-    let mut cpp = 1;
     let coeffs = normalize_wb(self.get_wb()?);
     debug!("WB coeff: {:?}", coeffs);
 
@@ -238,6 +248,14 @@ impl<'a> Decoder for NefDecoder<'a> {
     } else if let Some(padding) = self.is_uncompressed(raw)? {
       debug!("NEF uncompressed row padding: {}, little-endian: {}", padding, self.tiff.little_endian());
       match bps {
+        16 => {
+          // Used by Coolscan scanners
+          if self.tiff.little_endian() {
+            decode_16le(&src, width * cpp, height, dummy)
+          } else {
+            decode_16be(&src, width * cpp, height, dummy)
+          }
+        }
         14 => {
           if (self.tiff.little_endian() || self.camera.find_hint("little_endian")) && !self.camera.find_hint("big_endian") {
             // Models like D6 uses packed instead of unpacked 14le encoding. And D6 uses
@@ -297,33 +315,48 @@ impl<'a> Decoder for NefDecoder<'a> {
     FormatDump::Nef(NefFormat { tiff: self.tiff.clone() })
   }
 
-  fn raw_metadata(&self, _file: &mut RawFile, _params: RawDecodeParams) -> Result<RawMetadata> {
+  fn raw_metadata(&self, _file: &RawSource, _params: &RawDecodeParams) -> Result<RawMetadata> {
     let exif = Exif::new(self.tiff.root_ifd())?;
-    //let mdata = RawMetadata::new(&self.camera, exif);
-    let mdata = RawMetadata::new_with_lens(&self.camera, exif, self.get_lens_description()?.cloned());
-    Ok(mdata)
+    Ok(match self.get_lens_description() {
+      Ok(lens_data) => RawMetadata::new_with_lens(&self.camera, exif, lens_data.cloned()),
+      Err(err) => {
+        log::warn!("Failed to read lens information: {:?}", err);
+        RawMetadata::new(&self.camera, exif)
+      }
+    })
   }
 
-  fn full_image(&self, file: &mut RawFile) -> Result<Option<DynamicImage>> {
-    let root_ifd = &self.tiff.root_ifd();
-    if !root_ifd.contains_singlestrip_image() {
-      // TODO: implement multistrip
+  fn full_image(&self, file: &RawSource, params: &RawDecodeParams) -> Result<Option<DynamicImage>> {
+    if params.image_index != 0 {
       return Ok(None);
     }
-    let buf = root_ifd
-      .singlestrip_data(file.inner())
-      .map_err(|e| RawlerError::DecoderFailed(format!("Failed to get strip data: {}", e)))?;
-    let compression = root_ifd.get_entry(TiffCommonTag::Compression).ok_or("Missing tag")?.force_usize(0);
-    let width = fetch_tiff_tag!(root_ifd, TiffCommonTag::ImageWidth).force_usize(0);
-    let height = fetch_tiff_tag!(root_ifd, TiffCommonTag::ImageLength).force_usize(0);
-    if compression == 1 {
-      Ok(Some(DynamicImage::ImageRgb8(
-        ImageBuffer::<Rgb<u8>, Vec<u8>>::from_raw(width as u32, height as u32, buf).unwrap(),
-      )))
+    // High resolution preview image is stored in JPEGInterchangeFormat tag.
+    // Search for all IFDs and use the best match.
+    let mut ifds = self.tiff.find_ifds_with_filter(|ifd| {
+      if ifd.get_new_sub_file_type() == Some(1) {
+        ifd.get_entry(ExifTag::JPEGInterchangeFormatLength).is_some()
+      } else {
+        false
+      }
+    });
+
+    ifds.sort_by(|a, b| {
+      a.get_entry(ExifTag::JPEGInterchangeFormatLength)
+        .map(|x| x.force_u32(0))
+        .cmp(&b.get_entry(ExifTag::JPEGInterchangeFormatLength).map(|x| x.force_u32(0)))
+    });
+
+    // Take the IFD with the largest JPEG stream size
+    if let Some(jpeg_ifd) = ifds.last() {
+      return Ok(Some(dynamic_image_from_jpeg_interchange_format(jpeg_ifd, file)?));
     } else {
-      let img = image::load_from_memory_with_format(&buf, image::ImageFormat::Jpeg).unwrap();
-      Ok(Some(img))
+      // No matching IFDs found, use root IFD (possibly bad resolution)
+      Ok(Some(dynamic_image_from_ifd(self.tiff.root_ifd(), file)?))
     }
+  }
+
+  fn format_hint(&self) -> FormatHint {
+    FormatHint::NEF
   }
 }
 
@@ -365,11 +398,17 @@ impl<'a> NefDecoder<'a> {
           NefLensData::FMount(oldv) => {
             let composite_id = oldv.composite_id(lenstype.force_u8(0));
             log::debug!("NEF lens composite ID: {}", composite_id);
-            let resolver = LensResolver::new().with_nikon_id(Some(composite_id)).with_mounts(&[NIKON_F_MOUNT.into()]);
+            let resolver = LensResolver::new()
+              .with_nikon_id(Some(composite_id))
+              .with_camera(&self.camera)
+              .with_mounts(&[NIKON_F_MOUNT.into()]);
             return Ok(resolver.resolve());
           }
           NefLensData::ZMount(newv) => {
-            let resolver = LensResolver::new().with_lens_id((newv.lens_id as u32, 0)).with_mounts(&[NIKON_Z_MOUNT.into()]);
+            let resolver = LensResolver::new()
+              .with_lens_id((newv.lens_id as u32, 0))
+              .with_camera(&self.camera)
+              .with_mounts(&[NIKON_Z_MOUNT.into()]);
             return Ok(resolver.resolve());
           }
         }
@@ -380,7 +419,7 @@ impl<'a> NefDecoder<'a> {
 
   fn get_wb(&self) -> Result<[f32; 4]> {
     if self.camera.find_hint("nowb") {
-      Ok([NAN, NAN, NAN, NAN])
+      Ok([f32::NAN, f32::NAN, f32::NAN, f32::NAN])
     } else if let Some(levels) = self.makernote.get_entry(TiffCommonTag::NefWB0) {
       Ok([levels.force_f32(0), 1.0, 1.0, levels.force_f32(1)])
     } else if let Some(levels) = self.makernote.get_entry(TiffCommonTag::NrwWB) {
@@ -473,7 +512,8 @@ impl<'a> NefDecoder<'a> {
         x => Err(RawlerError::unsupported(&self.camera, format!("NEF: Don't know about WB version 0x{:x}", x))),
       }
     } else {
-      Err(RawlerError::DecoderFailed("NEF: Don't know how to fetch WB".to_string()))
+      log::debug!("NEF: Don't know how to fetch WB, fallback to [1.0, 1.0, 1.0]");
+      Ok([1.0, 1.0, 1.0, 1.0])
     }
   }
 
@@ -502,7 +542,7 @@ impl<'a> NefDecoder<'a> {
     let size = fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts).force_usize(0);
 
     fn div_round_up(a: usize, b: usize) -> usize {
-      (a + b - 1) / b
+      a.div_ceil(b) // (a + b - 1) / b
     }
 
     let req_pixels = width * height;
@@ -528,7 +568,7 @@ impl<'a> NefDecoder<'a> {
     })
   }
 
-  fn decode_compressed(&self, src: &OptBuffer, width: usize, height: usize, bps: usize, dummy: bool) -> Result<PixU16> {
+  fn decode_compressed(&self, src: &PaddedBuf, width: usize, height: usize, bps: usize, dummy: bool) -> Result<PixU16> {
     let meta = if let Some(meta) = self.makernote.get_entry(TiffCommonTag::NefMeta2) {
       debug!("Found NefMeta2");
       meta
@@ -635,7 +675,7 @@ impl<'a> NefDecoder<'a> {
 
   // Decodes 12 bit data in an YUY2-like pattern (2 Luma, 1 Chroma per 2 pixels).
   // We un-apply the whitebalance, so output matches lossless.
-  pub(crate) fn decode_snef_compressed(src: &OptBuffer, coeffs: [f32; 4], width: usize, height: usize, dummy: bool) -> PixU16 {
+  pub(crate) fn decode_snef_compressed(src: &PaddedBuf, coeffs: [f32; 4], width: usize, height: usize, dummy: bool) -> PixU16 {
     let inv_wb_r = (1024.0 / coeffs[0]) as i32;
     let inv_wb_b = (1024.0 / coeffs[2]) as i32;
 
@@ -708,7 +748,7 @@ fn normalize_wb(raw_wb: [f32; 4]) -> [f32; 4] {
       *v /= div
     }
   });
-  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], NAN]
+  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], f32::NAN]
 }
 
 crate::tags::tiff_tag_enum!(NikonMakernote);

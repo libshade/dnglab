@@ -86,7 +86,8 @@ data:
         lens_make: Canon
         lens_model: EF-S 18-55mm f/3.5-5.6 IS
         gps: ~
-      model: Rebel XS
+        user_comment: ~
+      model: EOS Digital Rebel XS
       make: Canon
       lens:
         identifiers:

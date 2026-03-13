@@ -112,6 +112,9 @@ pub enum TiffCommonTag {
   Cr2StripeWidths = 0xC640,
   ActiveArea = 0xC68D,
   MaskedAreas = 0xC68E,
+  TimeCodes = 0xC763,
+  FrameFrate = 0xC764,
+  TStop = 0xC772,
   RafRawSubIFD = 0xF000,
   RafImageWidth = 0xF001,
   RafImageLength = 0xF002,
@@ -286,6 +289,7 @@ pub enum ExifTag {
   ChromaticAberrationCorrParams = 0x7035,
   DistortionCorrection = 0x7036,
   DistortionCorrParams = 0x7037,
+  SonyRawImageSize = 0x7038,
   SonyCropTopLeft = 0x74c7,
   SonyCropSize = 0x74c8,
   ImageID = 0x800d,
@@ -331,7 +335,7 @@ pub enum ExifTag {
   UIC2Tag = 0x835d,
   UIC3Tag = 0x835e,
   UIC4Tag = 0x835f,
-  PtcNaa = 0x83bb,
+  IptcNaa = 0x83bb,
   IntergraphPacketData = 0x847e,
   IntergraphFlagRegisters = 0x847f,
   IntergraphMatrix = 0x8480,
@@ -615,11 +619,31 @@ pub enum DngTag {
   OriginalDefaultCropSize = 51091,
   NewRawImageDigest = 51111,
   RawToPreviewGain = 51112,
+  // 1.5.0
+  DepthFormat = 51177,
+  DepthNear = 51178,
+  DepthFar = 51179,
+  DepthUnits = 51180,
+  DepthMeasureType = 51181,
+  EnhanceParams = 51182,
+
   // 1.6.0
+  ProfileGainTableMap = 52525,
+  SemanticName = 52526,
+  SemanticInstanceID = 52528,
+  MaskSubArea = 52536,
+  RGBTables = 52543,
+
   CalibrationIlluminant3 = 52529,
   ColorMatrix3 = 52531,
   CameraCalibration3 = 52530,
   ReductionMatrix3 = 52538,
   ProfileHueSatMapData3 = 52537,
   ForwardMatrix3 = 52532,
+  IlluminantData1 = 52533,
+  IlluminantData2 = 52534,
+  IlluminantData3 = 52535,
+
+  // 1.7.1
+  ColumnInterleaveFactor = 52547,
 }

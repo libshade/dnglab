@@ -24,7 +24,7 @@ impl PartialEq for Rational {
 
 impl Eq for Rational {}
 
-#[allow(clippy::incorrect_partial_ord_impl_on_ord_type)]
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for Rational {
   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
     let n1: u64 = self.n as u64 * other.d as u64;
@@ -231,6 +231,17 @@ impl From<u32> for Rational {
   }
 }
 
+impl From<f32> for Rational {
+  fn from(value: f32) -> Self {
+    if value.is_sign_negative() {
+      panic!("Can not convert {} to Rational type", value);
+    }
+    let ratio = num::rational::Ratio::from_float(value).expect("Failed to convert float");
+    // TODO: This is a workaround, need to implement better routine
+    Self::new(ratio.numer().try_into().unwrap(), ratio.denom().try_into().unwrap())
+  }
+}
+
 impl Rational {
   pub fn new(n: u32, d: u32) -> Self {
     Self { n, d }
@@ -301,7 +312,7 @@ impl PartialEq for SRational {
 
 impl Eq for SRational {}
 
-#[allow(clippy::incorrect_partial_ord_impl_on_ord_type)]
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for SRational {
   fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
     let n1: i64 = self.n as i64 * other.d as i64;
@@ -845,7 +856,7 @@ impl Value {
               | ((*v.get(3).unwrap_or(&0) as u32) << 24),
           )
         }
-        Self::Short(v) => Ok((v[0] as u32) | (*v.get(1).unwrap_or(&0) as u32) << 16),
+        Self::Short(v) => Ok((v[0] as u32) | ((*v.get(1).unwrap_or(&0) as u32) << 16)),
         Self::Long(v) => Ok(v[0]),
         Self::SByte(v) => Ok(
           (*v.get(0).unwrap_or(&0) as u32)
@@ -859,7 +870,7 @@ impl Value {
             | ((*v.get(2).unwrap_or(&0) as u32) << 16)
             | ((*v.get(3).unwrap_or(&0) as u32) << 24),
         ),
-        Self::SShort(v) => Ok((v[0] as u32) | (*v.get(1).unwrap_or(&0) as u32) << 16),
+        Self::SShort(v) => Ok((v[0] as u32) | ((*v.get(1).unwrap_or(&0) as u32) << 16)),
         Self::SLong(v) => Ok(v[0] as u32),
         Self::Float(v) => Ok(v[0] as u32),
         Self::Unknown(_, v) => Ok(
@@ -1195,6 +1206,18 @@ impl From<u32> for Value {
 impl From<&[u32]> for Value {
   fn from(value: &[u32]) -> Self {
     Value::Long(value.into())
+  }
+}
+
+impl From<Vec<i16>> for Value {
+  fn from(value: Vec<i16>) -> Self {
+    Value::SShort(value)
+  }
+}
+
+impl From<&Vec<i16>> for Value {
+  fn from(value: &Vec<i16>) -> Self {
+    Value::SShort(value.clone())
   }
 }
 

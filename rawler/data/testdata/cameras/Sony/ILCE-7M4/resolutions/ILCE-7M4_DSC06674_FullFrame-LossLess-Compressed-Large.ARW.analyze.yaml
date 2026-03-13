@@ -21,8 +21,8 @@ data:
           x: 0
           y: 0
         d:
-          w: 7168
-          h: 5120
+          w: 7032
+          h: 4688
       blacklevels:
         levels:
           - 512/1
@@ -52,7 +52,7 @@ data:
         exposure_time: 1/50
         fnumber: 56/10
         aperture_value: ~
-        brightness_value: ~
+        brightness_value: 12664/2560
         iso_speed_ratings: 250
         iso_speed: ~
         recommended_exposure_index: 250
@@ -89,6 +89,7 @@ data:
         lens_make: Sony
         lens_model: FE 50mm F2.5 G
         gps: ~
+        user_comment: ~
       model: ILCE-7M4
       make: Sony
       lens:

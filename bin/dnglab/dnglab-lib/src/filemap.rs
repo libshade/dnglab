@@ -84,6 +84,7 @@ impl MapMode {
       return Err(AppError::NotFound(input.to_owned()));
     }
     let input_md = input.metadata()?;
+
     if input_md.is_file() {
       Ok(MapMode::File(FileMap::new(&input.canonicalize()?, output)))
     } else if input_md.is_dir() {
@@ -113,7 +114,7 @@ where
   let dir = read_dir(input)?;
   for entry in dir {
     let entry = entry?;
-    let in_md = fs::metadata(&entry.path())?;
+    let in_md = fs::metadata(entry.path())?;
     if in_md.is_file() {
       if filter(&entry.path()) {
         result.push(entry.path());

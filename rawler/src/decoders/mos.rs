@@ -1,26 +1,25 @@
-use std::f32::NAN;
-
-use crate::alloc_image_ok;
-use crate::analyze::FormatDump;
-use crate::decompressors::ljpeg::LjpegDecompressor;
-use crate::exif::Exif;
-use crate::formats::tiff::reader::TiffReader;
-use crate::formats::tiff::GenericTiffReader;
-use crate::packed::decode_16be;
-use crate::packed::decode_16le;
-use crate::pixarray::PixU16;
-use crate::tags::TiffCommonTag;
-use crate::RawFile;
 use crate::RawImage;
 use crate::RawLoader;
 use crate::RawlerError;
 use crate::Result;
+use crate::alloc_image_ok;
+use crate::analyze::FormatDump;
+use crate::decompressors::ljpeg::LjpegDecompressor;
+use crate::exif::Exif;
+use crate::formats::tiff::GenericTiffReader;
+use crate::formats::tiff::reader::TiffReader;
+use crate::packed::decode_16be;
+use crate::packed::decode_16le;
+use crate::pixarray::PixU16;
+use crate::rawsource::RawSource;
+use crate::tags::TiffCommonTag;
 
-use super::ok_cfa_image;
 use super::Camera;
 use super::Decoder;
+use super::FormatHint;
 use super::RawDecodeParams;
 use super::RawMetadata;
+use super::ok_cfa_image;
 
 #[derive(Debug, Clone)]
 pub struct MosDecoder<'a> {
@@ -31,7 +30,7 @@ pub struct MosDecoder<'a> {
 }
 
 impl<'a> MosDecoder<'a> {
-  pub fn new(_file: &mut RawFile, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<MosDecoder<'a>> {
+  pub fn new(_file: &RawSource, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<MosDecoder<'a>> {
     let make = Self::xmp_tag(&tiff, "Make")?;
     let model_full = Self::xmp_tag(&tiff, "Model")?;
     let model = model_full.split_terminator('(').next().unwrap();
@@ -42,22 +41,25 @@ impl<'a> MosDecoder<'a> {
 }
 
 impl<'a> Decoder for MosDecoder<'a> {
-  fn raw_image(&self, file: &mut RawFile, _params: RawDecodeParams, dummy: bool) -> Result<RawImage> {
-    let raw = self.tiff.find_first_ifd_with_tag(TiffCommonTag::TileOffsets).unwrap();
+  fn raw_image(&self, file: &RawSource, _params: &RawDecodeParams, dummy: bool) -> Result<RawImage> {
+    let raw = self
+      .tiff
+      .find_first_ifd_with_tag(TiffCommonTag::TileOffsets)
+      .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a IFD with TileOffsets tag")))?;
     let width = fetch_tiff_tag!(raw, TiffCommonTag::ImageWidth).force_usize(0);
     let height = fetch_tiff_tag!(raw, TiffCommonTag::ImageLength).force_usize(0);
     let offset = fetch_tiff_tag!(raw, TiffCommonTag::TileOffsets).force_usize(0);
-    let src = file.subview_until_eof(offset as u64).unwrap();
+    let src = file.subview_until_eof(offset as u64)?;
 
     let image = match fetch_tiff_tag!(raw, TiffCommonTag::Compression).force_usize(0) {
       1 => {
         if self.tiff.little_endian() {
-          decode_16le(&src, width, height, dummy)
+          decode_16le(src, width, height, dummy)
         } else {
-          decode_16be(&src, width, height, dummy)
+          decode_16be(src, width, height, dummy)
         }
       }
-      7 | 99 => self.decode_compressed(&self.camera, &src, width, height, dummy)?,
+      7 | 99 => self.decode_compressed(&self.camera, src, width, height, dummy)?,
       x => return Err(RawlerError::unsupported(&self.camera, format!("MOS: unsupported compression {}", x))),
     };
 
@@ -69,10 +71,14 @@ impl<'a> Decoder for MosDecoder<'a> {
     todo!()
   }
 
-  fn raw_metadata(&self, _file: &mut RawFile, _params: RawDecodeParams) -> Result<RawMetadata> {
+  fn raw_metadata(&self, _file: &RawSource, _params: &RawDecodeParams) -> Result<RawMetadata> {
     let exif = Exif::new(self.tiff.root_ifd())?;
     let mdata = RawMetadata::new(&self.camera, exif);
     Ok(mdata)
+  }
+
+  fn format_hint(&self) -> FormatHint {
+    FormatHint::MOS
   }
 }
 
@@ -87,17 +93,17 @@ impl<'a> MosDecoder<'a> {
         if let Some(endpos) = data.iter().position(|&x| x == 0) {
           let nums = String::from_utf8_lossy(&data[0..endpos])
             .split_terminator('\n')
-            .map(|x| x.parse::<f32>().unwrap_or(NAN))
+            .map(|x| x.parse::<f32>().unwrap_or(f32::NAN))
             .collect::<Vec<f32>>();
           if nums.len() == 4 {
-            return Ok([nums[0] / nums[1], nums[0] / nums[2], nums[0] / nums[3], NAN]);
+            return Ok([nums[0] / nums[1], nums[0] / nums[2], nums[0] / nums[3], f32::NAN]);
           }
         }
         break;
       }
       pos += 1;
     }
-    Ok([NAN, NAN, NAN, NAN])
+    Ok([f32::NAN, f32::NAN, f32::NAN, f32::NAN])
   }
 
   fn xmp_tag(tiff: &GenericTiffReader, tag: &str) -> Result<String> {

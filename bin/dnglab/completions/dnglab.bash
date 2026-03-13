@@ -1,12 +1,16 @@
 _dnglab() {
     local i cur prev opts cmd
     COMPREPLY=()
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
+        cur="$2"
+    else
+        cur="${COMP_WORDS[COMP_CWORD]}"
+    fi
+    prev="$3"
     cmd=""
     opts=""
 
-    for i in ${COMP_WORDS[@]}
+    for i in "${COMP_WORDS[@]:0:COMP_CWORD}"
     do
         case "${cmd},${i}" in
             ",$1")
@@ -73,12 +77,20 @@ _dnglab() {
 
     case "${cmd}" in
         dnglab)
-            opts="-d -v -h -V --help --version analyze convert ftpserver cameras lenses makedng gui extract help"
+            opts="-d -v -h -V --loglevel --help --version analyze convert ftpserver cameras lenses makedng gui extract help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -87,12 +99,20 @@ _dnglab() {
             return 0
             ;;
         dnglab__analyze)
-            opts="-d -v -h --raw-pixel --full-pixel --preview-pixel --thumbnail-pixel --raw-checksum --preview-checksum --thumbnail-checksum --srgb --meta --structure --summary --json --yaml --help <FILE>"
+            opts="-d -v -h --raw-pixel --full-pixel --preview-pixel --thumbnail-pixel --raw-checksum --preview-checksum --thumbnail-checksum --srgb --meta --structure --summary --json --yaml --loglevel --help <FILE>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -101,12 +121,20 @@ _dnglab() {
             return 0
             ;;
         dnglab__cameras)
-            opts="-d -v -h --md --help"
+            opts="-d -v -h --md --loglevel --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -115,7 +143,7 @@ _dnglab() {
             return 0
             ;;
         dnglab__convert)
-            opts="-c -f -r -d -v -h --compression --ljpeg92-predictor --dng-preview --dng-thumbnail --embed-raw --artist --image-index --crop --override --recursive --help <INPUT> <OUTPUT>"
+            opts="-c -f -r -d -v -h --compression --ljpeg92-predictor --dng-preview --dng-thumbnail --embed-raw --artist --keep-mtime --image-index --crop --override --recursive --loglevel --help <INPUT> <OUTPUT>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -147,6 +175,10 @@ _dnglab() {
                     ;;
                 --artist)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --keep-mtime)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
                     return 0
                     ;;
                 --image-index)
@@ -157,6 +189,14 @@ _dnglab() {
                     COMPREPLY=($(compgen -W "best activearea none" -- "${cur}"))
                     return 0
                     ;;
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -165,12 +205,20 @@ _dnglab() {
             return 0
             ;;
         dnglab__extract)
-            opts="-r -f -d -v -h --skipchecks --recursive --override --help <INPUT> <OUTPUT>"
+            opts="-r -f -d -v -h --skipchecks --recursive --override --loglevel --help <INPUT> <OUTPUT>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -179,7 +227,7 @@ _dnglab() {
             return 0
             ;;
         dnglab__ftpserver)
-            opts="-c -f -d -v -h --compression --ljpeg92-predictor --dng-preview --dng-thumbnail --embed-raw --artist --image-index --crop --override --port --listen --keep-original --help <OUTPUT>"
+            opts="-c -f -d -v -h --compression --ljpeg92-predictor --dng-preview --dng-thumbnail --embed-raw --artist --keep-mtime --image-index --crop --override --port --listen --keep-original --loglevel --help <OUTPUT>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -211,6 +259,10 @@ _dnglab() {
                     ;;
                 --artist)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --keep-mtime)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
                     return 0
                     ;;
                 --image-index)
@@ -233,6 +285,14 @@ _dnglab() {
                     COMPREPLY=($(compgen -W "true false" -- "${cur}"))
                     return 0
                     ;;
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -241,12 +301,20 @@ _dnglab() {
             return 0
             ;;
         dnglab__gui)
-            opts="-d -v -h --help"
+            opts="-d -v -h --loglevel --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -395,12 +463,20 @@ _dnglab() {
             return 0
             ;;
         dnglab__lenses)
-            opts="-d -v -h --md --help"
+            opts="-d -v -h --md --loglevel --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -409,7 +485,7 @@ _dnglab() {
             return 0
             ;;
         dnglab__makedng)
-            opts="-o -i -f -d -v -h --output --input --map --dng-backward-version --colorimetric-reference --unique-camera-model --artist --make --model --matrix1 --matrix2 --matrix3 --illuminant1 --illuminant2 --illuminant3 --linearization --wb --white-xy --override --help"
+            opts="-o -i -f -d -v -h --output --input --map --dng-backward-version --colorimetric-reference --unique-camera-model --artist --make --model --matrix1 --matrix2 --matrix3 --illuminant1 --illuminant2 --illuminant3 --linearization --wb --white-xy --override --loglevel --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -495,6 +571,14 @@ _dnglab() {
                     COMPREPLY=($(compgen -W "D50 D65 custom x,y value (comma seperated)" -- "${cur}"))
                     return 0
                     ;;
+                --loglevel)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
+                -d)
+                    COMPREPLY=($(compgen -W "error warn info debug trace" -- "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -505,4 +589,8 @@ _dnglab() {
     esac
 }
 
-complete -F _dnglab -o nosort -o bashdefault -o default dnglab
+if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]; then
+    complete -F _dnglab -o nosort -o bashdefault -o default dnglab
+else
+    complete -F _dnglab -o bashdefault -o default dnglab
+fi

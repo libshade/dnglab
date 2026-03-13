@@ -70,6 +70,16 @@ aperture_range = [[28, 10], [28, 10]]
 
 [[lenses]]
 mount = "rf-mount"
+key = "RF28-70mm F2.8 IS STM"
+lens_id = 61182
+lens_subid = 318
+make = "Canon"
+model = "RF 24-70mm F2.8L IS STM"
+focal_range = [[24, 1], [70, 1]]
+aperture_range = [[28, 10], [28, 10]]
+
+[[lenses]]
+mount = "rf-mount"
 key = "RF15-35mm F2.8 L IS USM"
 lens_id = 61182
 lens_subid = 264
@@ -288,3 +298,73 @@ make = "Canon"
 model = "RF-S 18-150mm F3.5-6.3 IS STM"
 focal_range = [[18, 1], [150, 1]]
 aperture_range = [[5, 1], [63, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF135mm F1.8 L IS USM"
+lens_id = 61182
+lens_subid = 303
+make = "Canon"
+model = "RF 135mm F1.8L IS USM"
+focal_range = [[135, 1], [135, 1]]
+aperture_range = [[18, 10], [18, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF200-800mm F6.3-9 IS USM"
+lens_id = 61182
+lens_subid = 309
+make = "Canon"
+model = "RF 200-800mm F6.3-9 IS USM"
+focal_range = [[200, 1], [800, 1]]
+aperture_range = [[63, 10], [9, 1]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF-S10-18mm F4.5-6.3 IS STM"
+lens_id = 61182
+lens_subid = 315
+make = "Canon"
+model = "RF-S 10-18mm F4.5-6.3 IS STM"
+focal_range = [[10, 1], [18, 1]]
+aperture_range = [[45, 10], [63,10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF28mm F2.8 STM"
+lens_id = 61182
+lens_subid = 313
+make = "Canon"
+model = "RF 28mm F2.8 STM"
+focal_range = [[28, 1], [28, 1]]
+aperture_range = [[28, 10], [28,10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF70-200mm F2.8 L IS USM Z"
+lens_id = 61182
+lens_subid = 319
+make = "Canon"
+model = "RF 70-200mm F2.8L IS USM Z"
+focal_range = [[70, 1], [200, 1]]
+aperture_range = [[28, 10], [28, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF50mm F1.4 L VCM"
+lens_id = 61182
+lens_subid = 325
+make = "Canon"
+model = "RF 50mm F1.4L VCM"
+focal_range = [[50, 1], [50, 1]]
+aperture_range = [[14, 10], [14, 10]]
+
+[[lenses]]
+mount = "rf-mount"
+key = "RF5.2mm F2.8 L DUAL FISHEYE"
+lens_id = 61182
+lens_subid = 301
+make = "Canon"
+model = "RF 5.2mm F2.8L DUAL FISHEYE"
+focal_range = [[52, 10], [52, 10]]
+aperture_range = [[28, 10], [28, 10]]

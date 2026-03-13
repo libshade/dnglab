@@ -89,7 +89,8 @@ data:
         lens_make: Canon
         lens_model: "EF-S 18-55mm f/3.5-5.6 [II]"
         gps: ~
-      model: Rebel XTi
+        user_comment: ~
+      model: EOS Digital Rebel XTi
       make: Canon
       lens:
         identifiers:

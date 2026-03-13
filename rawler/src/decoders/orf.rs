@@ -1,17 +1,21 @@
 use std::cmp;
-use std::f32::NAN;
 use std::io::Read;
 use std::io::Seek;
 
+use crate::RawImage;
+use crate::RawLoader;
+use crate::RawlerError;
+use crate::Result;
 use crate::alloc_image;
 use crate::analyze::FormatDump;
+use crate::buffer::PaddedBuf;
 use crate::exif::Exif;
-use crate::formats::tiff::reader::TiffReader;
 use crate::formats::tiff::Entry;
 use crate::formats::tiff::GenericTiffReader;
+use crate::formats::tiff::IFD;
 use crate::formats::tiff::Rational;
 use crate::formats::tiff::Value;
-use crate::formats::tiff::IFD;
+use crate::formats::tiff::reader::TiffReader;
 use crate::imgop::Dim2;
 use crate::imgop::Point;
 use crate::imgop::Rect;
@@ -23,18 +27,14 @@ use crate::pumps::BitPump;
 use crate::pumps::BitPumpMSB;
 use crate::rawimage::CFAConfig;
 use crate::rawimage::RawPhotometricInterpretation;
+use crate::rawsource::RawSource;
 use crate::tags::ExifTag;
 use crate::tags::TiffCommonTag;
-use crate::OptBuffer;
-use crate::RawFile;
-use crate::RawImage;
-use crate::RawLoader;
-use crate::RawlerError;
-use crate::Result;
 
 use super::BlackLevel;
 use super::Camera;
 use super::Decoder;
+use super::FormatHint;
 use super::RawDecodeParams;
 use super::RawMetadata;
 
@@ -117,11 +117,11 @@ pub fn parse_makernote<R: Read + Seek>(reader: &mut R, exif_ifd: &IFD) -> Result
 }
 
 impl<'a> OrfDecoder<'a> {
-  pub fn new(file: &mut RawFile, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<OrfDecoder<'a>> {
+  pub fn new(file: &RawSource, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<OrfDecoder<'a>> {
     let camera = rawloader.check_supported(tiff.root_ifd())?;
 
     let makernote = if let Some(exif) = tiff.find_first_ifd_with_tag(ExifTag::MakerNotes) {
-      parse_makernote(file.inner(), exif)?
+      parse_makernote(&mut file.reader(), exif)?
     } else {
       log::warn!("ORF makernote not found");
       None
@@ -140,12 +140,26 @@ impl<'a> OrfDecoder<'a> {
 }
 
 impl<'a> Decoder for OrfDecoder<'a> {
-  fn raw_image(&self, file: &mut RawFile, _params: RawDecodeParams, dummy: bool) -> Result<RawImage> {
-    let raw = self.tiff.find_first_ifd_with_tag(TiffCommonTag::StripOffsets).unwrap();
+  fn raw_image(&self, file: &RawSource, _params: &RawDecodeParams, dummy: bool) -> Result<RawImage> {
+    let raw = self
+      .tiff
+      .find_first_ifd_with_tag(TiffCommonTag::StripOffsets)
+      .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a IFD with StripOffsets tag")))?;
     let width = fetch_tiff_tag!(raw, TiffCommonTag::ImageWidth).force_usize(0);
     let height = fetch_tiff_tag!(raw, TiffCommonTag::ImageLength).force_usize(0);
     let offset = fetch_tiff_tag!(raw, TiffCommonTag::StripOffsets).force_usize(0);
     let counts = fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts);
+    let bps = match self.get_bits_per_pixel()? {
+      Some(bps) if [12, 14].contains(&bps) => bps,
+      Some(bps) => {
+        log::warn!("Unsupported bps: {}", bps);
+        bps
+      }
+      None => {
+        log::debug!("No bps found, fallback to 12");
+        12
+      }
+    } as usize;
 
     let mut size: usize = 0;
     for i in 0..counts.count() {
@@ -158,7 +172,7 @@ impl<'a> Decoder for OrfDecoder<'a> {
       self.camera.clone()
     };
 
-    let src: OptBuffer = file.subview(offset as u64, size as u64).unwrap().into(); // TODO add size and check all samples
+    let src = file.subview_padded(offset as u64, size as u64)?; // TODO add size and check all samples
 
     log::debug!(
       "ORF raw image size: {}, dim: {}x{}, total mp: {}, strip counts: {}",
@@ -195,17 +209,22 @@ impl<'a> Decoder for OrfDecoder<'a> {
       }
     } else {
       log::debug!("ORF: fallback to decode_compressed");
-      OrfDecoder::decode_compressed(&src, width, height, dummy)
+      OrfDecoder::decode_compressed(&src, width, height, bps, dummy)
     };
 
     let cpp = 1;
 
-    let blacklevel = self.get_blacklevel()?;
+    let blacklevel = self.get_blacklevel(bps)?;
     let whitelevel = None;
     let photometric = RawPhotometricInterpretation::Cfa(CFAConfig::new_from_camera(&self.camera));
     let mut img = RawImage::new(camera, image, cpp, normalize_wb(self.get_wb()?), photometric, blacklevel, whitelevel, dummy);
     if let Some(crop) = self.get_crop()? {
       img.crop_area = Some(crop);
+    }
+    if bps == 14 {
+      // Blacklevel is already corrected, only required for whitelevel.
+      // Encoded for 12 bps, whitelevel must be multiplied by 4.
+      img.whitelevel.0.iter_mut().for_each(|level| *level = *level << 2);
     }
 
     Ok(img)
@@ -215,10 +234,14 @@ impl<'a> Decoder for OrfDecoder<'a> {
     todo!()
   }
 
-  fn raw_metadata(&self, _file: &mut RawFile, __params: RawDecodeParams) -> Result<RawMetadata> {
+  fn raw_metadata(&self, _file: &RawSource, __params: &RawDecodeParams) -> Result<RawMetadata> {
     let exif = Exif::new(self.tiff.root_ifd())?;
     let mdata = RawMetadata::new_with_lens(&self.camera, exif, self.get_lens_description()?.cloned());
     Ok(mdata)
+  }
+
+  fn format_hint(&self) -> FormatHint {
+    FormatHint::ORF
   }
 }
 
@@ -230,7 +253,7 @@ impl<'a> OrfDecoder<'a> {
    * is based on the output of all previous pixel (bar the first four)
    */
 
-  pub fn decode_compressed(buf: &OptBuffer, width: usize, height: usize, dummy: bool) -> PixU16 {
+  pub fn decode_compressed(buf: &PaddedBuf, width: usize, height: usize, bps: usize, dummy: bool) -> PixU16 {
     let mut out = alloc_image!(width, height, dummy);
 
     /* Build a table to quickly look up "high" value */
@@ -248,7 +271,8 @@ impl<'a> OrfDecoder<'a> {
 
     let mut left: [i32; 2] = [0; 2];
     let mut nw: [i32; 2] = [0; 2];
-    let mut pump = BitPumpMSB::new(&buf[7..]);
+    let skip = if bps == 14 { 8 } else { 7 };
+    let mut pump = BitPumpMSB::new(&buf[skip..]);
 
     for row in 0..height {
       let mut acarry: [[i32; 3]; 2] = [[0; 3]; 2];
@@ -324,7 +348,7 @@ impl<'a> OrfDecoder<'a> {
     out
   }
 
-  fn get_blacklevel(&self) -> Result<Option<BlackLevel>> {
+  fn get_blacklevel(&self, bps: usize) -> Result<Option<BlackLevel>> {
     let ifd = self.makernote.find_ifds_with_tag(OrfImageProcessing::OrfBlackLevels);
     if ifd.is_empty() {
       log::info!("ORF: Couldn't find ImgProc IFD, unable to read blacklevel");
@@ -332,8 +356,20 @@ impl<'a> OrfDecoder<'a> {
     }
 
     let blacks = fetch_tiff_tag!(ifd[0], OrfImageProcessing::OrfBlackLevels);
-    let levels = [blacks.force_u16(0), blacks.force_u16(1), blacks.force_u16(2), blacks.force_u16(3)];
+    let mut levels = [blacks.force_u16(0), blacks.force_u16(1), blacks.force_u16(2), blacks.force_u16(3)];
+    if bps == 14 {
+      // Blacklevel is encoded for 12 bits
+      levels.iter_mut().for_each(|level| *level = *level << 2);
+    }
     Ok(Some(BlackLevel::new(&levels, self.camera.cfa.width, self.camera.cfa.height, 1)))
+  }
+
+  fn get_bits_per_pixel(&self) -> Result<Option<u16>> {
+    let ifd = self.makernote.find_ifds_with_tag(OrfImageProcessing::ValidBits);
+    if ifd.is_empty() {
+      return Ok(None);
+    }
+    Ok(Some(fetch_tiff_tag!(ifd[0], OrfImageProcessing::ValidBits).force_u16(0)))
   }
 
   fn get_crop(&self) -> Result<Option<Rect>> {
@@ -350,7 +386,7 @@ impl<'a> OrfDecoder<'a> {
 
   /// Get lens description by analyzing TIFF tags and makernotes
   fn get_lens_description(&self) -> Result<Option<&'static LensDescription>> {
-    if let Some(ifd) = self.makernote.get_sub_ifds(OrfMakernotes::EquipmentIFD).and_then(|v| v.get(0)) {
+    if let Some(ifd) = self.makernote.get_sub_ifd(OrfMakernotes::EquipmentIFD) {
       match ifd.get_entry(OrfEquipmentTags::LensType) {
         Some(Entry {
           value: Value::Byte(settings), ..
@@ -363,6 +399,7 @@ impl<'a> OrfDecoder<'a> {
           log::debug!("ORF lens composite ID: {}", composite_id);
           let resolver = LensResolver::new()
             .with_olympus_id(Some(composite_id))
+            .with_camera(&self.camera)
             .with_focal_len(self.get_focal_len()?)
             .with_mounts(&[MFT_MOUNT.into()]);
           return Ok(resolver.resolve());
@@ -414,7 +451,7 @@ fn normalize_wb(raw_wb: [f32; 4]) -> [f32; 4] {
       *v /= div
     }
   });
-  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], NAN]
+  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], f32::NAN]
 }
 
 crate::tags::tiff_tag_enum!(OrfMakernotes);
@@ -439,6 +476,7 @@ pub enum OrfImageProcessing {
   ImageProcessingVersion = 0x0000,
   WB_RBLevels = 0x0100,
   OrfBlackLevels = 0x0600,
+  ValidBits = 0x0611,
   CropLeft = 0x0612,
   CropTop = 0x0613,
   CropWidth = 0x0614,

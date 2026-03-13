@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2021 Daniel Vogelbacher <daniel@chaospixel.com>
 
-use super::{apply_corr, entry::RawEntry, file::TiffFile, Entry, Result, TiffError, IFD};
+use super::{Entry, IFD, Result, TiffError, apply_corr, entry::RawEntry, file::TiffFile};
 use crate::{
   bits::Endian,
-  tags::{TiffCommonTag, TiffTag},
+  tags::{ExifTag, TiffCommonTag, TiffTag},
 };
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
@@ -22,8 +22,14 @@ pub trait TiffReader {
     self.root_ifd().endian
   }
 
-  fn sub_ifd_tags(&self) -> Vec<u16> {
-    vec![TiffCommonTag::SubIFDs.into(), TiffCommonTag::ExifIFDPointer.into()]
+  /// Returns a list of well-known tags representing SubIFDs.
+  fn wellknown_sub_ifd_tags(&self) -> Vec<u16> {
+    vec![
+      TiffCommonTag::SubIFDs.into(),
+      TiffCommonTag::ExifIFDPointer.into(),
+      ExifTag::GPSInfo.into(),
+      ExifTag::IccProfile.into(),
+    ]
   }
 
   fn root_ifd(&self) -> &IFD {
@@ -42,7 +48,7 @@ pub trait TiffReader {
     None
   }
 
-  fn get_entry_raw<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R) -> Result<Option<RawEntry>> {
+  fn get_entry_raw<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R) -> Result<Option<RawEntry<'a>>> {
     for ifd in &self.file().chain {
       if let Some(entry) = ifd.get_entry_raw(tag, file)? {
         return Ok(Some(entry));
@@ -73,11 +79,29 @@ pub trait TiffReader {
     ifds
   }
 
+  fn find_ifds_with_filter<F: Fn(&IFD) -> bool>(&self, filter: F) -> Vec<&IFD> {
+    let mut ifds = Vec::new();
+    for ifd in &self.file().chain {
+      if filter(ifd) {
+        ifds.push(ifd);
+      }
+      // Now search in all sub IFDs
+      for subs in ifd.sub_ifds() {
+        for ifd in subs.1 {
+          if filter(ifd) {
+            ifds.push(ifd);
+          }
+        }
+      }
+    }
+    ifds
+  }
+
   fn find_ifd_with_new_subfile_type(&self, typ: u32) -> Option<&IFD> {
     let list = self.find_ifds_with_tag(TiffCommonTag::NewSubFileType);
     list
       .iter()
-      .find(|ifd| ifd.get_entry(TiffCommonTag::NewSubFileType).unwrap().force_u32(0) == typ)
+      .find(|ifd| ifd.get_entry(TiffCommonTag::NewSubFileType).expect("IFD must contain this entry").force_u32(0) == typ)
       .copied()
   }
 
@@ -88,11 +112,7 @@ pub trait TiffReader {
 
   fn find_first_ifd_with_tag<T: TiffTag>(&self, tag: T) -> Option<&IFD> {
     let ifds = self.find_ifds_with_tag(tag);
-    if ifds.is_empty() {
-      None
-    } else {
-      Some(ifds[0])
-    }
+    if ifds.is_empty() { None } else { Some(ifds[0]) }
   }
 
   fn get_first_entry(&self, _tag: u16) -> Option<Entry> {
@@ -143,7 +163,7 @@ pub trait TiffReader {
     let mut chain = Vec::new();
     while next_ifd != 0 {
       // TODO: check if offset is in range
-      let mut multi_sub_tags = self.sub_ifd_tags(); // TODO: cleanup
+      let mut multi_sub_tags = self.wellknown_sub_ifd_tags();
       multi_sub_tags.extend_from_slice(sub_tags);
       let ifd = IFD::new(reader, next_ifd, self.file().base, self.file().corr, endian, &multi_sub_tags)?;
       if ifd.entries.is_empty() {

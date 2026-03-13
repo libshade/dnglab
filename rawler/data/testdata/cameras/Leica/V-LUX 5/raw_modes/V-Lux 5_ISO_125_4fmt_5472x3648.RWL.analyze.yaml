@@ -85,8 +85,9 @@ data:
         lens_make: ~
         lens_model: ~
         gps: ~
+        user_comment: ~
       model: V-Lux 5
-      make: LEICA
+      make: Leica
       lens: ~
       unique_image_id: ~
       rating: ~

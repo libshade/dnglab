@@ -89,7 +89,8 @@ data:
         lens_make: Canon
         lens_model: EF 28mm f/1.8 USM
         gps: ~
-      model: Kiss X4
+        user_comment: ~
+      model: EOS Kiss X4
       make: Canon
       lens:
         identifiers:

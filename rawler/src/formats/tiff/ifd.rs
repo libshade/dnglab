@@ -2,14 +2,14 @@
 // Copyright 2021 Daniel Vogelbacher <daniel@chaospixel.com>
 
 use super::{
-  apply_corr,
+  Entry, Result, TiffError, Value, apply_corr,
   entry::RawEntry,
   read_from_file,
   reader::{EndianReader, ReadByteOrder},
-  Entry, Result, TiffError, Value,
 };
 use crate::{
   bits::Endian,
+  rawsource::RawSource,
   tags::{ExifTag, TiffCommonTag, TiffTag},
 };
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -20,10 +20,18 @@ use std::{
   io::{Read, Seek, SeekFrom},
 };
 
+const MAX_IFD_ENTRIES: usize = 4096;
+
 #[derive(Debug)]
 pub enum OffsetMode {
   Absolute,
   RelativeToIFD,
+}
+
+#[derive(Debug)]
+pub enum DataMode {
+  Strips,
+  Tiles,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -97,28 +105,56 @@ impl IFD {
     let mut sub_ifd_offsets = HashMap::new();
     let mut reader = EndianReader::new(reader, endian);
     let entry_count = reader.read_u16()?;
+
+    if entry_count as usize > MAX_IFD_ENTRIES {
+      log::warn!(
+        "TIFF: IFD entry count {} is suspicious (limit {}). The file might be corrupt.",
+        entry_count,
+        MAX_IFD_ENTRIES
+      );
+    }
+
     let mut entries = BTreeMap::new();
     let mut sub = HashMap::new();
     let mut next_pos = reader.position()?;
     debug!("Parse entries");
-    for _ in 0..entry_count {
-      reader.goto(next_pos)?;
+    let mut consecutive_errors = 0;
+
+    for i in 0..entry_count {
+      if i as usize >= MAX_IFD_ENTRIES {
+        log::warn!(
+          "TIFF: Reached maximum IFD entry limit ({}). Stopping parse to prevent infinite loops.",
+          MAX_IFD_ENTRIES
+        );
+        break;
+      }
+
+      if let Err(e) = reader.goto(next_pos) {
+        log::warn!("Truncated IFD: Could not seek to next entry position. Stopping parse. Error: {}", e);
+        break;
+      }
+
       next_pos += 12;
-      //let embedded = reader.read_u32()?;
-      let tag = reader.read_u16()?;
+
+      let tag = match reader.read_u16() {
+        Ok(t) => t,
+        Err(e) => {
+          log::warn!("Truncated IFD: Could not read tag ID (Index {}). Stopping parse. Error: {}", i, e);
+          break;
+        }
+      };
 
       match Entry::parse(&mut reader, base, corr, tag) {
         Ok(entry) => {
+          consecutive_errors = 0;
+
           if sub_tags.contains(&tag) {
-            //let entry = Entry::parse(&mut reader, base, corr, tag)?;
             match &entry.value {
               Value::Long(offsets) => {
                 sub_ifd_offsets.insert(tag, offsets.clone());
-                //sub_ifd_offsets.extend_from_slice(&offsets);
               }
               Value::Unknown(tag, offsets) => {
                 sub_ifd_offsets.insert(*tag, vec![offsets[0] as u32]);
-                //sub_ifd_offsets.extend_from_slice(&offsets);
               }
               Value::Undefined(_) => {
                 sub_ifd_offsets.insert(tag, vec![entry.offset().unwrap() as u32]);
@@ -135,7 +171,14 @@ impl IFD {
           entries.insert(entry.tag, entry);
         }
         Err(err) => {
-          log::info!("Failed to parse TIFF tag 0x{:X}, skipping: {:?}", tag, err);
+          consecutive_errors += 1;
+          log::warn!("Failed to parse TIFF tag 0x{:X} (Index {}). Error: {:?}", tag, i, err);
+
+          // If we fail 5 times in a row, the IFD is likely garbage or physically truncated.
+          if consecutive_errors >= 5 {
+            log::warn!("Too many consecutive parsing errors ({}). Stopping parse to prevent flood.", consecutive_errors);
+            break;
+          }
         }
       }
     }
@@ -179,6 +222,16 @@ impl IFD {
       sub,
       chain: vec![],
     })
+  }
+
+  pub fn copy_tag(dst: &mut Self, src: &Self, tag: impl Into<u16>) {
+    if let Some(entry) = src.get_entry(tag.into()) {
+      dst.entries.insert(entry.tag, entry.clone());
+    }
+  }
+
+  pub fn value_iter(&self) -> impl Iterator<Item = (&u16, &Value)> {
+    self.entries().iter().map(|(tag, entry)| (tag, &entry.value))
   }
 
   /*
@@ -306,7 +359,7 @@ impl IFD {
     self.entries.get(&tag.into()).or_else(|| self.get_entry_subs(tag))
   }
 
-  pub fn get_entry_raw<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R) -> Result<Option<RawEntry>> {
+  pub fn get_entry_raw<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R) -> Result<Option<RawEntry<'a>>> {
     if let Some(entry) = self.get_entry(tag) {
       return Ok(Some(RawEntry {
         entry,
@@ -318,7 +371,7 @@ impl IFD {
   }
 
   /// Get the data of a tag by just reading as many `len` bytes from offet.
-  pub fn get_entry_raw_with_len<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R, len: usize) -> Result<Option<RawEntry>> {
+  pub fn get_entry_raw_with_len<'a, T: TiffTag, R: Read + Seek>(&'a self, tag: T, file: &mut R, len: usize) -> Result<Option<RawEntry<'a>>> {
     if let Some(entry) = self.get_entry(tag) {
       return Ok(Some(RawEntry {
         entry,
@@ -329,8 +382,33 @@ impl IFD {
     Ok(None)
   }
 
-  pub fn get_sub_ifds<T: TiffTag>(&self, tag: T) -> Option<&Vec<IFD>> {
+  pub fn get_sub_ifd_all<T: TiffTag>(&self, tag: T) -> Option<&Vec<IFD>> {
     self.sub.get(&tag.into())
+  }
+
+  pub fn get_sub_ifd<T: TiffTag>(&self, tag: T) -> Option<&IFD> {
+    if let Some(ifds) = self.get_sub_ifd_all(tag) {
+      if ifds.len() == 1 {
+        ifds.get(0)
+      } else {
+        log::warn!(
+          "get_sub_ifd() for tag {:?} found more IFDs than expected: {}. Fallback to first IFD!",
+          tag,
+          ifds.len()
+        );
+        ifds.get(0)
+      }
+    } else {
+      None
+    }
+  }
+
+  pub fn get_new_sub_file_type(&self) -> Option<u16> {
+    if let Some(entry) = self.get_entry(TiffCommonTag::NewSubFileType) {
+      Some(entry.force_u16(0))
+    } else {
+      None
+    }
   }
 
   pub fn find_ifds_with_tag<T: TiffTag>(&self, tag: T) -> Vec<&IFD> {
@@ -388,24 +466,27 @@ impl IFD {
     self.get_entry(TiffCommonTag::StripOffsets).map(Entry::count).unwrap_or(0) == 1
   }
 
-  pub fn singlestrip_data<R: Read + Seek>(&self, reader: &mut R) -> Result<Vec<u8>> {
+  pub fn singlestrip_data_rawsource<'a>(&self, rawsource: &'a RawSource) -> Result<&'a [u8]> {
     assert!(self.contains_singlestrip_image());
 
     let offset = self
       .get_entry(TiffCommonTag::StripOffsets)
       .ok_or_else(|| TiffError::General(("tag not found").to_string()))?
       .value
-      .force_usize(0);
+      .force_u32(0);
     let len = self
       .get_entry(TiffCommonTag::StripByteCounts)
       .ok_or_else(|| TiffError::General(("tag not found").to_string()))?
       .value
       .force_usize(0);
 
-    self.sub_buf(reader, offset, len)
+    Ok(rawsource.subview((self.base + offset) as u64, len as u64)?)
   }
 
-  pub fn strip_data<R: Read + Seek>(&self, reader: &mut R) -> Result<Vec<Vec<u8>>> {
+  /// Return byte slices to strip data.
+  /// If there exists a single strip only or if all strips are continous,
+  /// the second return value contains the whole strip data in a single slice.
+  pub fn strip_data<'a>(&self, rawsource: &'a RawSource) -> Result<(Vec<&'a [u8]>, Option<&'a [u8]>)> {
     if !self.has_entry(TiffCommonTag::StripOffsets) {
       return Err(TiffError::General("IFD contains no strip data".into()));
     }
@@ -427,11 +508,59 @@ impl IFD {
         sizes.len()
       )));
     }
+
+    // Check if all slices are continous
+    let (is_continous, end_off) =
+      offsets.iter().zip(sizes.iter()).fold(
+        (true, offsets[0]),
+        |acc, val| {
+          if acc.0 && acc.1 == *val.0 { (true, acc.1 + *val.1) } else { (false, 0) }
+        },
+      );
+
     let mut subviews = Vec::with_capacity(offsets.len());
     for (offset, size) in offsets.iter().zip(sizes.iter()) {
-      subviews.push(self.sub_buf(reader, *offset as usize, *size as usize)?);
+      subviews.push(rawsource.subview((self.base + *offset) as u64, *size as u64)?);
     }
-    Ok(subviews)
+
+    let continous = if is_continous {
+      Some(rawsource.subview((self.base + offsets[0]) as u64, (end_off - offsets[0]) as u64)?)
+    } else {
+      None
+    };
+
+    Ok((subviews, continous))
+  }
+
+  pub fn tile_data<'a>(&self, rawsource: &'a RawSource) -> Result<Vec<&'a [u8]>> {
+    let offsets = if let Some(Entry { value: Value::Long(data), .. }) = self.get_entry(TiffCommonTag::TileOffsets) {
+      data
+    } else {
+      return Err(TiffError::General("Invalid datatype for TileOffsets".to_string()));
+    };
+
+    let byte_counts = if let Some(Entry { value: Value::Long(data), .. }) = self.get_entry(TiffCommonTag::TileByteCounts) {
+      data
+    } else {
+      return Err(TiffError::General("Invalid datatype for TileByteCounts".to_string()));
+    };
+
+    let mut tile_slices = Vec::with_capacity(offsets.len());
+    offsets.iter().zip(byte_counts.iter()).for_each(|(offset, size)| {
+      tile_slices.push(rawsource.subview(*offset as u64, *size as u64).map_err(TiffError::Io));
+    });
+    Ok(tile_slices.into_iter().collect::<Result<Vec<_>>>()?)
+  }
+
+  /// Check for the data mode (Strips or Tiles)
+  pub fn data_mode(&self) -> Result<DataMode> {
+    if self.has_entry(TiffCommonTag::StripOffsets) {
+      Ok(DataMode::Strips)
+    } else if self.has_entry(TiffCommonTag::TileOffsets) {
+      Ok(DataMode::Tiles)
+    } else {
+      Err(TiffError::General("IFD has no StripOffsets or TileOffsets tag".into()))
+    }
   }
 
   pub fn parse_makernote<R: Read + Seek>(&self, reader: &mut R, offset_mode: OffsetMode, sub_tags: &[u16]) -> Result<Option<IFD>> {

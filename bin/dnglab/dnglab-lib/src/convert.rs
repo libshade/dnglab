@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::filemap::{FileMap, MapMode};
-use crate::jobs::raw2dng::{JobResult, Raw2DngJob};
 use crate::jobs::Job;
-use crate::{AppError, Result, PKG_NAME, PKG_VERSION};
+use crate::jobs::raw2dng::{JobResult, Raw2DngJob};
+use crate::{AppError, PKG_VERSION, Result};
 use rawler::dng::convert::ConvertParams;
 
 /// Entry point for Clap sub command `convert`
@@ -72,15 +72,22 @@ pub async fn convert(options: &ArgMatches) -> crate::Result<()> {
   let failure = results.iter().filter(|j| j.error.is_some()).count();
 
   if failure == 0 {
-    println!("Converted {}/{} files", success, total,);
+    eprintln!("Converted {}/{} files", success, total,);
   } else {
     eprintln!("Converted {}/{} files, {} failed:", success, total, failure,);
     for failed in results.iter().filter(|j| j.error.is_some()) {
       eprintln!("   {}", failed.job.input.display());
     }
   }
-  println!("Total time: {:.2}s", now.elapsed().as_secs_f32());
-  Ok(())
+  eprintln!("Total time: {:.2}s", now.elapsed().as_secs_f32());
+
+  let first_error = results.into_iter().filter(|j| j.error.is_some()).map(|j| j.error).next();
+  if let Some(Some(err)) = first_error {
+    // In case of errors, return the first error in the queue
+    Err(err)
+  } else {
+    Ok(())
+  }
 }
 
 /// Convert given raw file to dng file
@@ -111,12 +118,19 @@ fn generate_job(entry: &FileMap, options: &ArgMatches) -> Result<Vec<Raw2DngJob>
       thumbnail: options.get_flag("thumbnail"),
       compression: *options.get_one("compression").expect("compression has no default"),
       artist: options.get_one("artist").cloned(),
-      software: format!("{} {}", PKG_NAME, PKG_VERSION),
+      software: format!("{} {}", "DNGLab", PKG_VERSION),
       index: if do_batch { i } else { index },
       apply_scaling: false,
+      keep_mtime: options.get_flag("keep_mtime"),
     };
 
+    let input = PathBuf::from(&entry.src);
     let mut output = PathBuf::from(&entry.dest);
+
+    // If output is a directry
+    if input.is_file() && output.exists() && output.is_dir() {
+      output.push(entry.src.file_name().unwrap());
+    }
 
     let has_dng_ext = if let Some(ext) = output.extension() {
       ext.eq_ignore_ascii_case("dng")
@@ -148,7 +162,7 @@ fn generate_job(entry: &FileMap, options: &ArgMatches) -> Result<Vec<Raw2DngJob>
     }
 
     jobs.push(Raw2DngJob {
-      input: PathBuf::from(&entry.src),
+      input,
       output,
       replace: options.get_flag("override"),
       params,

@@ -3,7 +3,7 @@ use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
 
 use crate::formats::tiff::IFD;
-use crate::RawFile;
+use crate::rawsource::RawSource;
 
 pub type Result<T> = std::result::Result<T, JfifError>;
 
@@ -228,9 +228,12 @@ impl Jfif {
           offset: pos,
           app0: App0::read_segment(&mut reader, symbol)?,
         },
-        0xFFE1 => Segment::APP1 {
-          offset: pos,
-          app1: App1::read_segment(&mut reader, symbol)?,
+        0xFFE1 => match App1::read_segment(&mut reader, symbol) {
+          Ok(app1) => Segment::APP1 { offset: pos, app1 },
+          Err(err) => {
+            log::warn!("Failed to read APP1 (EXIF) segement, maybe corrupt: {:?}", err);
+            continue;
+          }
         },
         0xFFDA => Segment::SOS {
           offset: pos,
@@ -262,8 +265,8 @@ impl Jfif {
     }
   }
 
-  pub fn new(file: &mut RawFile) -> Result<Self> {
-    Self::parse(file.inner())
+  pub fn new(file: &RawSource) -> Result<Self> {
+    Self::parse(&mut file.reader())
   }
 
   pub fn exif_ifd(&self) -> Option<&IFD> {
@@ -292,7 +295,7 @@ impl Jfif {
   }
 }
 
-pub fn is_jfif(file: &mut RawFile) -> bool {
+pub fn is_jfif(file: &RawSource) -> bool {
   match file.subview(0, 4) {
     Ok(buf) => {
       let result = buf[0..4] == [0xFF, 0xD8, 0xFF, 0xE0];
@@ -308,7 +311,7 @@ pub fn is_jfif(file: &mut RawFile) -> bool {
   }
 }
 
-pub fn is_exif(file: &mut RawFile) -> bool {
+pub fn is_exif(file: &RawSource) -> bool {
   match file.subview(0, 4) {
     Ok(buf) => buf[0..4] == [0xFF, 0xD8, 0xFF, 0xE1],
     Err(err) => {

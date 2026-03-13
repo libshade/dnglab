@@ -121,7 +121,8 @@ data:
           gps_date_stamp: ~
           gps_differential: ~
           gps_h_positioning_error: ~
-      model: Rebel SL3
+        user_comment: ~
+      model: EOS Rebel SL3
       make: Canon
       lens: ~
       unique_image_id: 21292807130986028506237483605429465028

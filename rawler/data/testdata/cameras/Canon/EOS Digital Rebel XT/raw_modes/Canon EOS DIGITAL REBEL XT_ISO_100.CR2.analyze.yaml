@@ -82,7 +82,8 @@ data:
         lens_make: ~
         lens_model: ~
         gps: ~
-      model: Rebel XT
+        user_comment: ~
+      model: EOS Digital Rebel XT
       make: Canon
       lens: ~
       unique_image_id: ~

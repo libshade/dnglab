@@ -17,7 +17,7 @@ use crate::{
   tags::{ExifGpsTag, ExifTag, TiffTag},
 };
 
-use super::{Entry, Result, TiffError, Value, TIFF_MAGIC};
+use super::{Entry, Result, TIFF_MAGIC, TiffError, Value};
 
 pub struct TiffWriter<W> {
   ifd_location: u64,
@@ -163,7 +163,7 @@ impl DirectoryWriter {
     );
   }
 
-  pub fn add_untyped_tag<V: Into<Value>>(&mut self, tag: u16, value: V) -> Result<()> {
+  pub fn add_untyped_tag<V: Into<Value>>(&mut self, tag: u16, value: V) {
     self.entries.insert(
       tag,
       Entry {
@@ -172,7 +172,24 @@ impl DirectoryWriter {
         embedded: None,
       },
     );
-    Ok(())
+  }
+
+  pub fn contains<T: TiffTag>(&self, tag: T) -> bool {
+    self.entries.contains_key(&tag.into())
+  }
+
+  pub fn copy<'a>(&mut self, iter: impl Iterator<Item = (&'a u16, &'a Value)>) {
+    for entry in iter {
+      if !self.entries.contains_key(entry.0) {
+        self.add_untyped_tag(*entry.0, entry.1.clone());
+      }
+    }
+  }
+
+  pub fn copy_with_override<'a>(&mut self, iter: impl Iterator<Item = (&'a u16, &'a Value)>) {
+    for entry in iter {
+      self.add_untyped_tag(*entry.0, entry.1.clone());
+    }
   }
 
   pub fn add_tag_undefined<T: TiffTag>(&mut self, tag: T, data: Vec<u8>) {
@@ -219,7 +236,7 @@ impl DirectoryWriter {
     for &mut Entry {
       ref mut value,
       ref mut embedded,
-      ..
+      ref tag,
     } in self.entries.values_mut()
     {
       let data_bytes = 4;
@@ -230,6 +247,9 @@ impl DirectoryWriter {
         value.write(&mut tiff.writer)?;
         embedded.replace(offset as u32);
       } else {
+        if value.count() == 0 {
+          panic!("TIFF value is empty, tag: {:?}", tag);
+        }
         embedded.replace(value.as_embedded()?);
       }
     }
@@ -243,7 +263,9 @@ impl DirectoryWriter {
       tiff.writer.write_u16::<NativeEndian>(tag)?;
       tiff.writer.write_u16::<NativeEndian>(entry.value_type())?;
       tiff.writer.write_u32::<NativeEndian>(entry.count())?;
-      tiff.writer.write_u32::<NativeEndian>(entry.embedded.unwrap())?;
+      tiff
+        .writer
+        .write_u32::<NativeEndian>(entry.embedded.expect("embedded attribute must contain a value"))?;
     }
     tiff.writer.write_u32::<NativeEndian>(self.next_ifd)?; // Next IFD
 
@@ -271,6 +293,7 @@ impl crate::decoders::RawMetadata {
     transfer_entry(exif_ifd, ExifTag::FNumber, &exif.fnumber)?;
     transfer_entry(exif_ifd, ExifTag::ApertureValue, &exif.aperture_value)?;
     transfer_entry(exif_ifd, ExifTag::BrightnessValue, &exif.brightness_value)?;
+    transfer_entry(exif_ifd, ExifTag::ExposureBiasValue, &exif.exposure_bias)?;
     transfer_entry(exif_ifd, ExifTag::RecommendedExposureIndex, &exif.recommended_exposure_index)?;
     transfer_entry(exif_ifd, ExifTag::ExposureTime, &exif.exposure_time)?;
     transfer_entry(exif_ifd, ExifTag::ISOSpeedRatings, &exif.iso_speed_ratings)?;
@@ -306,6 +329,8 @@ impl crate::decoders::RawMetadata {
     transfer_entry(exif_ifd, ExifTag::LensSpecification, &exif.lens_spec)?;
     transfer_entry(exif_ifd, ExifTag::LensMake, &exif.lens_make)?;
     transfer_entry(exif_ifd, ExifTag::LensModel, &exif.lens_model)?;
+    transfer_entry(exif_ifd, ExifTag::UserComment, &exif.user_comment)?;
+    //transfer_entry(exif_ifd, ExifTag::MakerNotes, &exif.makernotes.as_ref().map(|x| Value::Undefined(x.clone())))?;
 
     Ok(())
   }
@@ -354,11 +379,7 @@ impl crate::decoders::RawMetadata {
         transfer_entry(&mut gps_ifd, ExifGpsTag::GPSDateStamp, &gps.gps_date_stamp)?;
         transfer_entry(&mut gps_ifd, ExifGpsTag::GPSDifferential, &gps.gps_differential)?;
         transfer_entry(&mut gps_ifd, ExifGpsTag::GPSHPositioningError, &gps.gps_h_positioning_error)?;
-        if gps_ifd.entry_count() > 0 {
-          Some(gps_ifd.build(tiff)?)
-        } else {
-          None
-        }
+        if gps_ifd.entry_count() > 0 { Some(gps_ifd.build(tiff)?) } else { None }
       };
       if let Some(gps_offset) = gps_offset {
         root_ifd.add_tag(ExifTag::GPSInfo, [gps_offset]);

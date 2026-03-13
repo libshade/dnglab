@@ -89,7 +89,8 @@ data:
         lens_make: Canon
         lens_model: EF-S 18-55mm f/3.5-5.6 III
         gps: ~
-      model: Rebel T3
+        user_comment: ~
+      model: EOS Rebel T3
       make: Canon
       lens:
         identifiers:

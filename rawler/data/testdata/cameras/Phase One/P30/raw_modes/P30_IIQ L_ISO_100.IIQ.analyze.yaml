@@ -79,8 +79,9 @@ data:
         lens_make: ~
         lens_model: ~
         gps: ~
+        user_comment: ~
       model: P30
-      make: Phase One A/S
+      make: Phase One
       lens: ~
       unique_image_id: ~
       rating: ~

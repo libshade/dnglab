@@ -76,7 +76,8 @@ data:
         lens_make: ~
         lens_model: ~
         gps: ~
-      model: Rebel
+        user_comment: ~
+      model: EOS Digital Rebel
       make: Canon
       lens: ~
       unique_image_id: ~

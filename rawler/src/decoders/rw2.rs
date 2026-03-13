@@ -1,15 +1,18 @@
-use std::f32::NAN;
-
 use image::DynamicImage;
 
+use crate::CFA;
+use crate::RawImage;
+use crate::RawLoader;
+use crate::RawlerError;
+use crate::Result;
 use crate::analyze::FormatDump;
 use crate::exif::Exif;
-use crate::formats::tiff::reader::TiffReader;
 use crate::formats::tiff::Entry;
 use crate::formats::tiff::GenericTiffReader;
+use crate::formats::tiff::IFD;
 use crate::formats::tiff::Rational;
 use crate::formats::tiff::Value;
-use crate::formats::tiff::IFD;
+use crate::formats::tiff::reader::TiffReader;
 use crate::imgop::Dim2;
 use crate::imgop::Point;
 use crate::imgop::Rect;
@@ -20,25 +23,21 @@ use crate::packed::decode_12le_wcontrol;
 use crate::pixarray::PixU16;
 use crate::rawimage::CFAConfig;
 use crate::rawimage::RawPhotometricInterpretation;
-use crate::tags::tiff_tag_enum;
+use crate::rawsource::RawSource;
 use crate::tags::ExifTag;
 use crate::tags::TiffCommonTag;
-use crate::OptBuffer;
-use crate::RawFile;
-use crate::RawImage;
-use crate::RawLoader;
-use crate::RawlerError;
-use crate::Result;
-use crate::CFA;
+use crate::tags::tiff_tag_enum;
 
 use self::v4decompressor::decode_panasonic_v4;
 use self::v5decompressor::decode_panasonic_v5;
 use self::v6decompressor::decode_panasonic_v6;
 use self::v7decompressor::decode_panasonic_v7;
+use self::v8decompressor::decode_panasonic_v8;
 
 use super::BlackLevel;
 use super::Camera;
 use super::Decoder;
+use super::FormatHint;
 use super::RawDecodeParams;
 use super::RawMetadata;
 
@@ -46,6 +45,7 @@ pub(crate) mod v4decompressor;
 pub(crate) mod v5decompressor;
 pub(crate) mod v6decompressor;
 pub(crate) mod v7decompressor;
+pub(crate) mod v8decompressor;
 
 #[derive(Debug, Clone)]
 pub struct Rw2Decoder<'a> {
@@ -57,13 +57,15 @@ pub struct Rw2Decoder<'a> {
 }
 
 impl<'a> Rw2Decoder<'a> {
-  pub fn new(_file: &mut RawFile, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<Rw2Decoder<'a>> {
+  pub fn new(_file: &RawSource, tiff: GenericTiffReader, rawloader: &'a RawLoader) -> Result<Rw2Decoder<'a>> {
     let raw = {
       let data = tiff.find_ifds_with_tag(TiffCommonTag::PanaOffsets);
       if !data.is_empty() {
         data[0]
       } else {
-        tiff.find_first_ifd_with_tag(TiffCommonTag::StripOffsets).unwrap()
+        tiff
+          .find_first_ifd_with_tag(TiffCommonTag::StripOffsets)
+          .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a IFD with StripOffsets tag")))?
       }
     };
 
@@ -104,7 +106,7 @@ impl<'a> Rw2Decoder<'a> {
 }
 
 impl<'a> Decoder for Rw2Decoder<'a> {
-  fn raw_image(&self, file: &mut RawFile, _params: RawDecodeParams, dummy: bool) -> Result<RawImage> {
+  fn raw_image(&self, file: &RawSource, _params: &RawDecodeParams, dummy: bool) -> Result<RawImage> {
     let width;
     let height;
 
@@ -113,12 +115,18 @@ impl<'a> Decoder for Rw2Decoder<'a> {
       if !data.is_empty() {
         (data[0], true)
       } else {
-        (self.tiff.find_first_ifd_with_tag(TiffCommonTag::StripOffsets).unwrap(), false)
+        (
+          self
+            .tiff
+            .find_first_ifd_with_tag(TiffCommonTag::StripOffsets)
+            .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a IFD with StripOffsets tag")))?,
+          false,
+        )
       }
     };
 
     let compression = raw.get_entry(PanasonicTag::Compression).map(|entry| entry.force_u16(0)).unwrap_or_default(); // TODO BUG
-                                                                                                                    //let compression = fetch_tiff_tag!(raw, PanasonicTag::Compression).force_u16(0);
+    //let compression = fetch_tiff_tag!(raw, PanasonicTag::Compression).force_u16(0);
 
     let raw_format = raw.get_entry(PanasonicTag::RawFormat).map(|entry| entry.force_u16(0)).unwrap_or_default(); // TODO BUG
 
@@ -133,23 +141,27 @@ impl<'a> Decoder for Rw2Decoder<'a> {
         height = fetch_tiff_tag!(raw, TiffCommonTag::PanaLength).force_usize(0);
         let offset = fetch_tiff_tag!(raw, TiffCommonTag::PanaOffsets).force_usize(0);
         //let size = fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts).force_usize(0);
-        //let src: OptBuffer = file.subview(offset as u64, size as u64).unwrap().into(); // TODO add size and check all samples
-        let src: OptBuffer = file.subview_until_eof(offset as u64).unwrap().into(); // TODO add size and check all samples
-        Rw2Decoder::decode_panasonic(&src, width, height, split, raw_format, bps, dummy)
+        log::debug!("PanaOffset: {}", offset);
+        let src = file.subview_until_eof_padded(offset as u64)?; // TODO add size and check all samples
+        Rw2Decoder::decode_panasonic(file, &src, width, height, split, raw_format, bps, self.tiff.root_ifd(), dummy)?
       } else {
-        let raw = self.tiff.find_first_ifd_with_tag(TiffCommonTag::StripOffsets).unwrap();
+        let raw = self
+          .tiff
+          .find_first_ifd_with_tag(TiffCommonTag::StripOffsets)
+          .ok_or_else(|| RawlerError::DecoderFailed(format!("Failed to find a IFD with StripOffsets tag")))?;
         width = fetch_tiff_tag!(raw, TiffCommonTag::PanaWidth).force_usize(0);
         height = fetch_tiff_tag!(raw, TiffCommonTag::PanaLength).force_usize(0);
         let offset = fetch_tiff_tag!(raw, TiffCommonTag::StripOffsets).force_usize(0);
         //let size = fetch_tiff_tag!(raw, TiffCommonTag::StripByteCounts).force_usize(0);
-        let src: OptBuffer = file.subview_until_eof(offset as u64).unwrap().into(); // TODO add size and check all samples
+        log::debug!("StripOffset: {}", offset);
+        let src = file.subview_until_eof_padded(offset as u64)?; // TODO add size and check all samples
 
         if src.len() >= width * height * 2 {
           decode_12le_unpacked_left_aligned(&src, width, height, dummy)
         } else if src.len() >= width * height * 3 / 2 {
           decode_12le_wcontrol(&src, width, height, dummy)
         } else {
-          Rw2Decoder::decode_panasonic(&src, width, height, split, raw_format, bps, dummy)
+          Rw2Decoder::decode_panasonic(file, &src, width, height, split, raw_format, bps, self.tiff.root_ifd(), dummy)?
         }
       }
     };
@@ -183,7 +195,10 @@ impl<'a> Decoder for Rw2Decoder<'a> {
     Ok(img)
   }
 
-  fn full_image(&self, _file: &mut RawFile) -> Result<Option<DynamicImage>> {
+  fn full_image(&self, _file: &RawSource, params: &RawDecodeParams) -> Result<Option<DynamicImage>> {
+    if params.image_index != 0 {
+      return Ok(None);
+    }
     if let Some(data) = self.tiff.get_entry(PanasonicTag::JpegData) {
       let buf = data.get_data();
       let img = image::load_from_memory_with_format(buf, image::ImageFormat::Jpeg)
@@ -197,7 +212,7 @@ impl<'a> Decoder for Rw2Decoder<'a> {
     todo!()
   }
 
-  fn raw_metadata(&self, _file: &mut RawFile, _params: RawDecodeParams) -> Result<RawMetadata> {
+  fn raw_metadata(&self, _file: &RawSource, _params: &RawDecodeParams) -> Result<RawMetadata> {
     let mut exif = Exif::new(self.tiff.root_ifd())?;
     if exif.iso_speed.unwrap_or(0) == 0 && exif.iso_speed_ratings.unwrap_or(0) == 0 && exif.recommended_exposure_index.unwrap_or(0) == 0 {
       // Use ISO from PanasonicRaw IFD
@@ -207,6 +222,10 @@ impl<'a> Decoder for Rw2Decoder<'a> {
     }
     let mdata = RawMetadata::new_with_lens(&self.camera, exif, self.get_lens_description()?.cloned());
     Ok(mdata)
+  }
+
+  fn format_hint(&self) -> FormatHint {
+    FormatHint::RW2
   }
 }
 
@@ -269,6 +288,7 @@ impl<'a> Rw2Decoder<'a> {
           );
           log::debug!("RW2 lens composite ID: {}", composite_id);
           let resolver = LensResolver::new()
+            .with_camera(&self.camera)
             .with_olympus_id(Some(composite_id))
             .with_focal_len(self.get_focal_len()?)
             .with_mounts(&[MFT_MOUNT.into()]);
@@ -324,16 +344,27 @@ impl<'a> Rw2Decoder<'a> {
     }
   }
 
-  pub(crate) fn decode_panasonic(buf: &[u8], width: usize, height: usize, split: bool, raw_format: u16, bps: u32, dummy: bool) -> PixU16 {
+  pub(crate) fn decode_panasonic(
+    file: &RawSource,
+    buf: &[u8],
+    width: usize,
+    height: usize,
+    split: bool,
+    raw_format: u16,
+    bps: u32,
+    ifd: &IFD,
+    dummy: bool,
+  ) -> Result<PixU16> {
     log::debug!("width: {}, height: {}, bps: {}", width, height, bps);
-    match raw_format {
+    Ok(match raw_format {
       3 => decode_panasonic_v4(buf, width, height, split, dummy),
       4 => decode_panasonic_v4(buf, width, height, split, dummy),
       5 => decode_panasonic_v5(buf, width, height, bps, dummy),
       6 => decode_panasonic_v6(buf, width, height, bps, dummy),
       7 => decode_panasonic_v7(buf, width, height, bps, dummy),
+      8 => decode_panasonic_v8(file, width, height, bps, ifd, dummy)?,
       _ => todo!("Format {} is not implemented", raw_format), // TODO: return error
-    }
+    })
   }
 }
 
@@ -346,7 +377,7 @@ fn normalize_wb(raw_wb: [f32; 4]) -> [f32; 4] {
       *v /= div
     }
   });
-  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], NAN]
+  [norm[0], (norm[1] + norm[2]) / 2.0, norm[3], f32::NAN]
 }
 
 tiff_tag_enum!(PanasonicTag);
@@ -383,6 +414,26 @@ pub enum PanasonicTag {
   CropLeft = 0x0030,
   CropBottom = 0x0031,
   CropRight = 0x0032,
+
+  CF2StripHeight = 0x0037,
+  CF2Unknown1 = 0x0039, // Gamma table CF2_GammaSlope?
+  CF2Unknown2 = 0x003a, // Gamma table CF2_GammaPoint?
+  CF2ClipVal = 0x003b,  // CF2_GammaClipVal
+  CF2HufInitVal0 = 0x003c,
+  CF2HufInitVal1 = 0x003d,
+  CF2HufInitVal2 = 0x003e,
+  CF2HufInitVal3 = 0x003f,
+  CF2HufTable = 0x0040,
+  CF2HufShiftDown = 0x0041,
+  CF2NumberOfStripsH = 0x0042,
+  CF2NumberOfStripsV = 0x0043,
+  CF2StripByteOffsets = 0x0044,
+  CF2StripLineOffsets = 0x0045,
+  CF2StripDataSize = 0x0046,
+  CF2StripWidths = 0x0047,
+  CF2StripHeights = 0x0048,
+  CF2StripWidth = 0x0064,
+
   CameraIFD = 0x0120,
   Multishot = 0x0121,
 }

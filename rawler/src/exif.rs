@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-  formats::tiff::{Rational, Result, SRational, Value, IFD},
+  formats::tiff::{IFD, Rational, Result, SRational, Value},
   lens::LensDescription,
   tags::{ExifGpsTag, ExifTag},
 };
@@ -20,7 +20,7 @@ pub struct Exif {
   pub exposure_time: Option<Rational>,
   pub fnumber: Option<Rational>,
   pub aperture_value: Option<Rational>,
-  pub brightness_value: Option<Rational>,
+  pub brightness_value: Option<SRational>,
   pub iso_speed_ratings: Option<u16>,
   pub iso_speed: Option<u32>,
   pub recommended_exposure_index: Option<u32>,
@@ -30,7 +30,7 @@ pub struct Exif {
   pub create_date: Option<String>,
   pub modify_date: Option<String>,
   pub exposure_program: Option<u16>,
-  pub timezone_offset: Option<i16>,
+  pub timezone_offset: Option<Vec<i16>>,
   pub offset_time: Option<String>,
   pub offset_time_original: Option<String>,
   pub offset_time_digitized: Option<String>,
@@ -57,6 +57,8 @@ pub struct Exif {
   pub lens_make: Option<String>,
   pub lens_model: Option<String>,
   pub gps: Option<ExifGPS>,
+  pub user_comment: Option<String>,
+  //pub makernotes: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -101,11 +103,12 @@ impl Exif {
   pub fn new(root_or_exif: &IFD) -> Result<Self> {
     let mut ins = Self::default();
     ins.extend_from_ifd(root_or_exif)?;
-    if let Some((_, exif_ifd)) = root_or_exif.sub_ifds().iter().find(|(tag, _)| **tag == ExifTag::ExifOffset as u16) {
-      ins.extend_from_ifd(&exif_ifd[0])?;
+    if let Some(exif_ifd) = root_or_exif.get_sub_ifd(ExifTag::ExifOffset) {
+      ins.extend_from_ifd(exif_ifd)?;
     }
-    if let Some((_, gps_ifd)) = root_or_exif.sub_ifds().iter().find(|(tag, _)| **tag == ExifTag::GPSInfo as u16) {
-      ins.extend_from_gps_ifd(&gps_ifd[0])?;
+    // Search for GPSInfo tag, usually it is located in IFD0
+    if let Some(gpsinfo_ifd) = root_or_exif.get_sub_ifd(ExifTag::GPSInfo) {
+      ins.extend_from_gps_ifd(gpsinfo_ifd)?;
     }
     Ok(ins)
   }
@@ -123,7 +126,7 @@ impl Exif {
           (ExifTag::Artist, Value::Ascii(data)) => self.artist = data.strings().get(0).map(trim),
           (ExifTag::ExposureTime, Value::Rational(data)) => self.exposure_time = data.get(0).cloned(),
           (ExifTag::FNumber, Value::Rational(data)) => self.fnumber = data.get(0).cloned(),
-          (ExifTag::BrightnessValue, Value::Rational(data)) => self.brightness_value = data.get(0).cloned(),
+          (ExifTag::BrightnessValue, Value::SRational(data)) => self.brightness_value = data.get(0).cloned(),
           (ExifTag::ApertureValue, Value::Rational(data)) => self.aperture_value = data.get(0).cloned(),
           (ExifTag::ISOSpeedRatings, Value::Short(data)) => self.iso_speed_ratings = data.get(0).cloned(),
           (ExifTag::ISOSpeed, Value::Long(data)) => self.iso_speed = data.get(0).cloned(),
@@ -134,7 +137,7 @@ impl Exif {
           (ExifTag::CreateDate, Value::Ascii(data)) => self.create_date = data.strings().get(0).cloned(),
           (ExifTag::ModifyDate, Value::Ascii(data)) => self.modify_date = data.strings().get(0).cloned(),
           (ExifTag::ExposureProgram, Value::Short(data)) => self.exposure_program = data.get(0).cloned(),
-          (ExifTag::TimeZoneOffset, Value::SShort(data)) => self.timezone_offset = data.get(0).cloned(),
+          (ExifTag::TimeZoneOffset, Value::SShort(data)) => self.timezone_offset = Some(data.clone()),
           (ExifTag::OffsetTime, Value::Ascii(data)) => self.offset_time = data.strings().get(0).cloned(),
           (ExifTag::OffsetTimeOriginal, Value::Ascii(data)) => self.offset_time_original = data.strings().get(0).cloned(),
           (ExifTag::OffsetTimeDigitized, Value::Ascii(data)) => self.offset_time_digitized = data.strings().get(0).cloned(),
@@ -158,6 +161,8 @@ impl Exif {
           (ExifTag::OwnerName, Value::Ascii(data)) => self.owner_name = data.strings().get(0).map(trim),
           (ExifTag::SerialNumber, Value::Ascii(data)) => self.serial_number = data.strings().get(0).map(trim),
           (ExifTag::LensSerialNumber, Value::Ascii(data)) => self.lens_serial_number = data.strings().get(0).map(trim),
+          (ExifTag::UserComment, Value::Ascii(data)) => self.user_comment = data.strings().get(0).map(trim),
+          //(ExifTag::MakerNotes, Value::Undefined(data)) => self.makernotes = Some(data.clone()),
           (tag, _value) => {
             log::debug!("Ignoring EXIF tag: {:?}", tag);
           }
@@ -211,7 +216,7 @@ impl Exif {
             (ExifGpsTag::GPSDifferential, Value::Short(data)) => gps.gps_differential = data.get(0).cloned(),
             (ExifGpsTag::GPSHPositioningError, Value::Rational(data)) => gps.gps_h_positioning_error = data.get(0).cloned(),
             (tag, _value) => {
-              log::debug!("Ignoring EXIF tag: {:?}", tag);
+              log::debug!("Ignoring EXIF GPS tag: {:?}", tag);
             }
           }
         }

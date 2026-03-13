@@ -1,6 +1,6 @@
 use crate::{
-  formats::tiff::{Entry, Value},
   RawlerError, Result,
+  formats::tiff::{Entry, Value},
 };
 
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ impl ColorData {
 pub(crate) fn parse_colordata(colordata: &Entry) -> Result<ColorData> {
   match &colordata.value {
     Value::Undefined(undef) => {
-      let transmuted: Vec<u16> = undef.chunks(2).map(|v| (v[1] as u16) << 8 | (v[0] as u16)).collect();
+      let transmuted: Vec<u16> = undef.chunks(2).map(|v| ((v[1] as u16) << 8) | (v[0] as u16)).collect();
       let data = &transmuted;
       let version: i16 = data[0] as i16;
 
@@ -71,6 +71,14 @@ pub(crate) fn parse_colordata(colordata: &Entry) -> Result<ColorData> {
       }
 
       let version: i16 = data[0] as i16;
+      /*
+      for (i, item) in data.iter().enumerate() {
+        if *item > 127 {
+        eprintln!("0x{:>4x}: {}", i, item);
+        }
+      }
+       */
+
       Ok(match version {
         // 1 = (1DmkIIN/5D/30D/400D)
         1 => ColorData::new(data, version, 63, Some(196), None, None),
@@ -122,6 +130,8 @@ pub(crate) fn parse_colordata(colordata: &Entry) -> Result<ColorData> {
         34 => ColorData::new(data, version, 0x69, Some(0x16b), Some(0x280), Some(0x281)),
         // 48 (R7/R10)
         48 => ColorData::new(data, version, 0x69, Some(0x16b), Some(0x281), Some(0x282)),
+        // 64 (R5MK2), 66 (R6MK3)
+        64 | 66 => ColorData::new(data, version, 0x69, Some(0x17f), Some(0x294), Some(0x295)),
 
         _ => return Err(format!("Unknown COLORDATA version: {}", data[0]).into()),
       })

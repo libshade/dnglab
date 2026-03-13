@@ -30,9 +30,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, windows-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
         include:
-        - os: ubuntu-20.04
+        - os: ubuntu-24.04
           install-deps: |
               cargo install cargo-deb
               sudo apt-get update
@@ -44,7 +44,6 @@ jobs:
           package-files: |
               target/debian/dnglab*.deb
               target/release/dnglab_linux_x64
-              target/aarch64-unknown-linux-gnu/debian/dnglab*.deb
               target/aarch64-unknown-linux-gnu/release/dnglab_linux_aarch64
 
         - os: windows-latest
@@ -52,14 +51,19 @@ jobs:
           pkg-cmd: cd target/release/ && 7z a dnglab-win-x64_${GITHUB_REF#refs/*/}.zip dnglab.exe
           package-files: target/release/dnglab*.zip
 
+        - os: macos-latest
+          build-cmd: cargo build --release
+          pkg-cmd: cd target/release/ && 7z a dnglab-macos-arm64_${GITHUB_REF#refs/*/}.zip dnglab
+          package-files: target/release/dnglab*.zip
+
     steps:
     - uses: actions/checkout@v2
     - uses: dtolnay/rust-toolchain@stable
-    - uses: actions/cache@v2
+    - uses: actions/cache@v4
       with:
         path: deps/dist
         key: ${{ runner.os }}-deps-${{ hashFiles('deps/*') }}
-    - uses: actions/cache@v2
+    - uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry
@@ -74,7 +78,7 @@ jobs:
       shell: bash
     - name: Debug
       if: failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: debug
         path: .
