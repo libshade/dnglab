@@ -2,7 +2,6 @@ use std::{
   borrow::Cow,
   io::{self, Seek, Write},
   mem::size_of,
-  time::Instant,
 };
 
 use image::{DynamicImage, codecs::jpeg::JpegEncoder, imageops::FilterType};
@@ -315,14 +314,11 @@ where
     Ok(())
   }
 
-  pub fn preview(&mut self, img: &DynamicImage, quality: f32) -> Result<()> {
-    let now = Instant::now();
-    let preview_img = if img.width() > 1024 {
+  pub fn preview(&mut self, img: &DynamicImage, quality: f32) -> Result<()> {    let preview_img = if img.width() > 1024 {
       DynamicImage::ImageRgb8(img.resize(1024, 768, FilterType::Nearest).to_rgb8())
     } else {
       DynamicImage::ImageRgb8(img.to_rgb8())
     };
-    debug!("preview downscale: {} s", now.elapsed().as_secs_f32());
 
     self.ifd_mut().add_tag(TiffCommonTag::ImageWidth, Value::long(preview_img.width()));
     self.ifd_mut().add_tag(TiffCommonTag::ImageLength, Value::long(preview_img.height()));
@@ -338,7 +334,6 @@ where
     //ifd.add_tag(TiffRootTag::YResolution, Rational { n: 1, d: 1 })?;
     //ifd.add_tag(TiffRootTag::ResolutionUnit, ResolutionUnit::None.to_u16())?;
 
-    let now = Instant::now();
     let offset = self.writer.dng.position()?;
     // TODO: improve offsets?
     let jpeg_encoder = JpegEncoder::new_with_quality(&mut self.writer.dng.writer, (quality * 100.0).max(100.0) as u8);
@@ -346,7 +341,6 @@ where
       .write_with_encoder(jpeg_encoder)
       .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("Failed to write jpeg preview: {:?}", err)))?;
     let data_len = self.writer.dng.position()? - offset;
-    debug!("writing preview: {} s", now.elapsed().as_secs_f32());
 
     self.ifd_mut().add_value(TiffCommonTag::StripOffsets, Value::Long(vec![offset]));
     self.ifd_mut().add_tag(TiffCommonTag::StripByteCounts, Value::Long(vec![data_len]));

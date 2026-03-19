@@ -3,7 +3,7 @@
 
 use multiversion::multiversion;
 use rayon::prelude::*;
-use std::{ops::Add, time::Instant};
+use std::ops::Add;
 
 use crate::{
   cfa::{CFA, CFA_COLOR_B, CFA_COLOR_G, CFA_COLOR_R, PlaneColor},
@@ -43,9 +43,6 @@ impl Demosaic<f32, 3> for PPGDemosaic {
     if !cfa.is_rgb() {
       panic!("CFA pattern '{}' is not a RGB pattern, can not demosaic with PPG", cfa);
     }
-    // Measure time
-    let now = Instant::now();
-
     // The ROI changes the pattern if not perfectly aligned on the origin pattern
     let cfa_roi = cfa.shift(roi.p.x, roi.p.y);
 
@@ -58,7 +55,6 @@ impl Demosaic<f32, 3> for PPGDemosaic {
     interpolate_rb_at_green(&mut rgb, &cfa_roi);
     interpolate_rb_at_non_green(&mut rgb, &cfa_roi);
 
-    log::debug!("PPG total debayer time: {:.5}s", now.elapsed().as_secs_f32());
     rgb
   }
 }

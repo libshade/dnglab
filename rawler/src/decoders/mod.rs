@@ -309,6 +309,11 @@ impl RawMetadata {
           .ok_or(RawlerError::DecoderFailed(format!("Failed to convert datetime to local: {:?}", mtime)))?;
         return Ok(Some(x.into()));
       } else {
+        #[cfg(target_arch = "wasm32")]
+        {
+          return Ok(Some(chrono::Utc.from_utc_datetime(&mtime).into()));
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         match chrono::Local.from_local_datetime(&mtime).earliest() {
           Some(ts) => return Ok(Some(ts.into())),
           None => {
