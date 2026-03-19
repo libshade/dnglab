@@ -353,14 +353,18 @@ impl<'a> Decoder for Cr3Decoder<'a> {
           }
           // IAD1 (big, used for full size raws)
           Iad1Type::Big(big) => {
-            img.crop_area = Some(Rect::new_with_points(
+            let rect_crop = Rect::new_with_points(
               Point::new(big.crop_left_offset as usize, big.crop_top_offset as usize),
               Point::new((big.crop_right_offset + 1) as usize, (big.crop_bottom_offset + 1) as usize),
-            ));
+            );
+            assert!(rect_crop.x() + rect_crop.width() <= cmp1.f_width as usize);
+            assert!(rect_crop.y() + rect_crop.height() <= cmp1.f_height as usize);
+
+            img.crop_area = Some(rect_crop);
 
             // For uncropped files this is fine, but for 1.6 crop files, the dimension is wrong.
             // For example, R5 crop is total height of 3510, but active_area_bottom_offset is 3512.
-            let rect = {
+            let rect_active = {
               // Limit the offsets to image bounds.
               // Probably broken firmware, glitches in sensor size calculation or I'm just making
               // wrong asumptions...
@@ -371,15 +375,30 @@ impl<'a> Decoder for Cr3Decoder<'a> {
                 Point::new(right, bottom),
               )
             };
-            log::debug!("IAD1 active area: {:?}", rect);
-            img.active_area = Some(rect);
-            //img.active_area = img.crop_area;
+            log::debug!("IAD1 active area: {:?}", rect_active);
+            assert!(rect_crop.x() >= rect_active.x());
+            assert!(rect_crop.y() >= rect_active.y());
+            assert!(rect_crop.width() <= rect_active.width());
+            assert!(rect_crop.height() <= rect_active.height());
+
+            // Check if after apply of active_area the crop is out of bounds.
+            // This is know to happen with R5II 1.6 crop raw files.
+            let overflow = (rect_crop.x() - rect_active.x()) + rect_crop.width() > rect_active.width();
+            if self.camera.find_hint("activearea_bug") && overflow {
+              // In this case, we ignore the active_area in IAD1 and use the crop instead.
+              log::debug!("Raw file has invalid active_area parameters in IAD1, using crop_area instead");
+              img.active_area = Some(rect_crop);
+            } else {
+              assert!(!overflow, "Hit the activearea_bug, maybe you just need to define the hint?");
+              img.active_area = Some(rect_active);
+            }
 
             let blackarea_h = Rect::new_with_points(
               Point::new(big.lob_left_offset as usize, big.lob_top_offset as usize),
               Point::new((big.lob_right_offset - 1) as usize, (big.lob_bottom_offset - 1) as usize),
             );
             if !blackarea_h.is_empty() {
+              // Areas are sometimes wrong, don't add them!
               //img.blackareas.push(blackarea_h);
             }
             let blackarea_v = Rect::new_with_points(
@@ -387,6 +406,7 @@ impl<'a> Decoder for Cr3Decoder<'a> {
               Point::new((big.tob_right_offset - 1) as usize, (big.tob_bottom_offset - 1) as usize),
             );
             if !blackarea_v.is_empty() {
+              // Areas are sometimes wrong, don't add them!
               //img.blackareas.push(blackarea_v);
             }
           }
@@ -404,7 +424,7 @@ impl<'a> Decoder for Cr3Decoder<'a> {
   }
 
   /// Extract preview image embedded in CR3
-  fn full_image(&self, file: &RawSource, params: &RawDecodeParams) -> Result<Option<DynamicImage>> {
+  fn preview_image(&self, file: &RawSource, params: &RawDecodeParams) -> Result<Option<DynamicImage>> {
     if params.image_index != 0 {
       return Ok(None);
     }
@@ -420,10 +440,11 @@ impl<'a> Decoder for Cr3Decoder<'a> {
     match image::load_from_memory_with_format(buf, image::ImageFormat::Jpeg) {
       Ok(img) => Ok(Some(img)),
       Err(e) => {
-        debug!("TRAK 0 contains no JPEG preview, is it PQ/HEIF? Error: {}", e);
-        Err(RawlerError::DecoderFailed(
-          "Unable to extract preview image from CR3 HDR-PQ file. Please see 'https://github.com/dnglab/dnglab/issues/7'".into(),
-        ))
+        warn!("TRAK 0 contains no JPEG preview, is it PQ/HEIF? Error: {}", e);
+        //Err(RawlerError::DecoderFailed(
+        //  "Unable to extract preview image from CR3 HDR-PQ file. Please see 'https://github.com/dnglab/dnglab/issues/7'".into(),
+        //))
+        Ok(None)
       }
     }
   }
@@ -687,7 +708,7 @@ impl Ctmd {
   pub fn focal_len(&self) -> Result<Option<Rational>> {
     if let Some(rec) = self.records.get(&4) {
       if rec.payload.len() < 4 {
-        return Ok(None)
+        return Ok(None);
       }
       let mut buf = ByteStream::new(rec.payload.as_slice(), Endian::Little);
       let focal_len = Rational::new(buf.get_u16().into(), buf.get_u16().into());

@@ -125,6 +125,7 @@ pub fn create_app() -> Command {
         .arg(arg!(preview_pixel: --"preview-pixel" "Write uncompressed preview pixel data to STDOUT").action(ArgAction::SetTrue))
         .arg(arg!(thumbnail_pixel: --"thumbnail-pixel" "Write uncompressed preview pixel data to STDOUT").action(ArgAction::SetTrue))
         .arg(arg!(raw_checksum: --"raw-checksum" "Write MD5 checksum of raw pixels to STDOUT").action(ArgAction::SetTrue))
+        .arg(arg!(full_checksum: --"full-checksum" "Write MD5 checksum of full pixels to STDOUT").action(ArgAction::SetTrue))
         .arg(arg!(preview_checksum: --"preview-checksum" "Write MD5 checksum of preview pixels to STDOUT").action(ArgAction::SetTrue))
         .arg(arg!(thumbnail_checksum: --"thumbnail-checksum" "Write MD5 checksum of thumbnail pixels to STDOUT").action(ArgAction::SetTrue))
         .arg(arg!(srgb: --srgb "Write sRGB 16-bit TIFF to STDOUT").action(ArgAction::SetTrue))
@@ -134,6 +135,36 @@ pub fn create_app() -> Command {
         .arg(arg!(json: --json "Format metadata as JSON").action(ArgAction::SetTrue))
         .arg(arg!(yaml: --yaml "Format metadata as YAML").action(ArgAction::SetTrue))
         .arg(arg!(<FILE> "Input file").value_parser(clap::value_parser!(PathBuf))),
+    )
+    .subcommand(
+      Command::new("process-raw")
+        .arg(
+          arg!(--"artist" <artist> "Set the artist tag")
+            .required(false)
+            .value_parser(NonEmptyStringValueParser::new()),
+        )
+        .arg(
+          arg!(keep_mtime: --"keep-mtime" <keepmtime> "Keep mtime, read from EXIF with fallback to original file mtime")
+            .value_parser(ValueParser::bool())
+            .required(false)
+            .default_value("false")
+            .default_missing_value("false"),
+        )
+        .arg(
+          arg!(index: --"image-index" <index> "Select a specific image index (or 'all') if file is a image container")
+            .required(false)
+            .default_value("0"),
+        )
+        .arg(
+          arg!(--"crop" <crop> "DNG default crop")
+            .required(false)
+            .value_parser(value_parser!(CropMode))
+            .default_value("best"),
+        )
+        .arg(arg!(-f --override "Override existing files").action(ArgAction::SetTrue))
+        .arg(arg!(-r --recursive "Process input directory recursive").action(ArgAction::SetTrue))
+        .arg(arg!(<INPUT> "Input file or directory").value_parser(clap::value_parser!(PathBuf)))
+        .arg(arg!(<OUTPUT> "Output file or existing directory").value_parser(clap::value_parser!(PathBuf))),
     )
     .subcommand(
       convert_base

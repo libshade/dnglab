@@ -1,5 +1,6 @@
 use std::cell::UnsafeCell;
 
+use itertools::Itertools;
 use multiversion::multiversion;
 use rayon::prelude::*;
 
@@ -378,6 +379,11 @@ where
     Self { data, width, height }
   }
 
+  pub fn new_with_default(width: usize, height: usize, default: T) -> Self {
+    let data = vec![[default; N]; width * height];
+    Self { data, width, height }
+  }
+
   pub fn into_inner(self) -> Vec<[T; N]> {
     self.data
   }
@@ -392,6 +398,10 @@ where
 
   pub fn flatten(&self) -> Vec<T> {
     self.data.iter().flatten().copied().collect::<Vec<T>>()
+  }
+
+  pub fn into_flatten(self) -> Vec<T> {
+    self.data.into_iter().flatten().collect::<Vec<T>>()
   }
 
   pub fn data_ptr(&self) -> Color2DPtr<T, N> {
@@ -481,6 +491,33 @@ where
     );
     Self::new_with(output, area.d.w, area.d.h)
   }
+
+  pub fn rotate_90cw(&self) -> Self {
+    let mut out = Self::new(self.height, self.width);
+    let out_width = out.width;
+    out.pixels_mut().chunks_exact_mut(out_width).enumerate().for_each(|(row, line)| {
+      line.iter_mut().enumerate().for_each(|(col, pixel)| {
+        *pixel = *self.at(self.height - 1 - col, row);
+      });
+    });
+    out
+  }
+
+  pub fn rotate_90ccw(&self) -> Self {
+    let mut out = Self::new(self.height, self.width);
+    let out_width = out.width;
+    out.pixels_mut().chunks_exact_mut(out_width).enumerate().for_each(|(row, line)| {
+      line.iter_mut().enumerate().for_each(|(col, pixel)| {
+        *pixel = *self.at(col, self.width - 1 - row);
+      });
+    });
+    out
+  }
+
+  pub fn rotate_180(&self) -> Self {
+    let data = self.pixels().iter().rev().copied().collect_vec();
+    Self::new_with(data, self.width, self.height)
+  }
 }
 
 impl<T, const N: usize> Default for Color2D<T, N>
@@ -495,6 +532,35 @@ where
     }
   }
 }
+
+/// An ugly hack to get multiple mutable references to Pix2D
+pub struct SharedColor2D<T: SubPixel, const N: usize> {
+  pub inner: UnsafeCell<Color2D<T, N>>,
+}
+
+impl<T, const N: usize> SharedColor2D<T, N>
+where
+  T: SubPixel,
+{
+  pub fn new(inner: Color2D<T, N>) -> Self {
+    Self { inner: inner.into() }
+  }
+
+  /// Get inner Pix2D<> reference
+  ///
+  /// # Safety
+  /// Only use this inside Rayon parallel iterators.
+  #[allow(clippy::mut_from_ref)]
+  pub unsafe fn inner_mut(&self) -> &mut Color2D<T, N> {
+    unsafe { &mut *self.inner.get() }
+  }
+
+  pub fn into_inner(self) -> Color2D<T, N> {
+    self.inner.into_inner()
+  }
+}
+
+unsafe impl<T, const N: usize> Sync for SharedColor2D<T, N> where T: SubPixel {}
 
 #[derive(Clone, Debug)]
 pub struct Color2DPtr<T, const N: usize> {
